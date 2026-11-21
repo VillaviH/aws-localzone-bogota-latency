@@ -4,3 +4,7 @@
 !*.tfvars.example
 crash.log
 .DS_Store
+
+# Borradores de publicación / publication drafts
+docs/blog-*.md
+docs/linkedin-*.md
