@@ -11,6 +11,18 @@ First measurements were taken in Ecuador (ISP-A fibre, ISP-B mobile 5G). Results
 - 2 EC2 `c7i.large` (the cheapest type offered in the Bogotá Local Zone; no t3), same Node app, same size.
 - App endpoints: `/ping` (tiny JSON) and `/payload` (1 MB). Both require the header `x-probe-token`, otherwise 403.
 
+## Architecture
+```mermaid
+flowchart LR
+  C["Your client<br/>(laptop / phone)<br/>curl, ping, mtr"] --> I((Internet))
+  I --> B
+  I --> V
+  subgraph R["AWS us-east-1 · VPC 10.10.0.0/24"]
+    B["Local Zone Bogotá<br/>us-east-1-bog-1a<br/>EC2 c7i.large · Node"]
+    V["Regional AZ (us-east-1b)<br/>EC2 c7i.large · Node"]
+  end
+```
+
 ## Requirements
 - An AWS account with the **Bogotá Local Zone opted in**:
   ```

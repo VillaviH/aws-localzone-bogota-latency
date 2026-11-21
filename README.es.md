@@ -11,6 +11,18 @@ Las primeras mediciones se hicieron en Ecuador (ISP-A fibra, ISP-B móvil 5G). L
 - 2 EC2 `c7i.large` (el tipo más barato disponible en la Local Zone de Bogotá; no hay t3), misma app Node, mismo tamaño.
 - Endpoints: `/ping` (JSON pequeño) y `/payload` (1 MB). Ambos exigen el header `x-probe-token`; sin él responden 403.
 
+## Arquitectura
+```mermaid
+flowchart LR
+  C["Tu cliente<br/>(laptop / celular)<br/>curl, ping, mtr"] --> I((Internet))
+  I --> B
+  I --> V
+  subgraph R["AWS us-east-1 · VPC 10.10.0.0/24"]
+    B["Local Zone Bogotá<br/>us-east-1-bog-1a<br/>EC2 c7i.large · Node"]
+    V["AZ regional (us-east-1b)<br/>EC2 c7i.large · Node"]
+  end
+```
+
 ## Requisitos
 - Una cuenta AWS con la **Local Zone de Bogotá activada** (comandos en el README en inglés).
 - Terraform >= 1.5, AWS CLI, `curl`, `bash` (en Windows, WSL). Opcional: `mtr`, `k6`.
