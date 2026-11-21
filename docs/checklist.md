@@ -1,0 +1,9 @@
+- [ ] Verificar zona y región padre
+- [ ] Opt-in de la Local Zone
+- [ ] Terraform: VPC + subred + EC2 (Bogotá, us-east-1)
+- [ ] App `/ping` y `/payload` (1 MB)
+- [ ] Medir 24 h con 2-3 ISPs
+- [ ] Calcular p50/p95/p99, jitter, pérdida
+- [ ] Dashboard y gráfica principal
+- [ ] Publicar repo, CSV, post/video
+- [ ] Destruir recursos

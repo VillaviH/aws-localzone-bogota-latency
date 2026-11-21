@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bogotá Local Zone vs Virginia: resultados</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#0f1720; --card:#17212c; --txt:#e6edf3; --mut:#9fb0c0; --bog:#2f81f7; --vir:#a371f7; --acc:#ff9900; --ok:#3fb950; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  main { max-width:1050px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:0 0 10px; }
+  .sub { color:var(--mut); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid #2a3948; border-radius:10px; padding:16px 18px; margin:14px 0; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+  .kpi { font-size:44px; font-weight:800; line-height:1.05; }
+  .bog { color:var(--bog); } .vir { color:var(--vir); } .acc { color:var(--acc); } .ok { color:var(--ok); }
+  .small { font-size:13px; color:var(--mut); }
+  select, button, input[type=file] { background:#0b1118; color:var(--txt); border:1px solid #2a3948; border-radius:6px; padding:6px 10px; font:inherit; }
+  .filters { display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+  .filters label { font-size:13px; color:var(--mut); display:flex; flex-direction:column; gap:3px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:right; padding:7px 10px; border-bottom:1px solid #2a3948; }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--mut); font-weight:600; }
+  .chartbox { position:relative; height:320px; }
+  #drop { border:2px dashed #2a3948; border-radius:10px; padding:18px; text-align:center; color:var(--mut); }
+  #drop.over { border-color:var(--acc); }
+  #msg { color:var(--acc); }
+</style>
+</head>
+<body>
+<main>
+<h1>¿Cuánto mejora la Local Zone de Bogotá?</h1>
+<p class="sub">Medido desde Ecuador. Mismo cliente, misma app, mismo tipo de instancia (<code>c7i.large</code>). Los datos se leen de los CSV de <code>scripts/measure.sh</code>.</p>
+
+<div id="drop">
+  Arrastra aquí <code>curl_bogota.csv</code> y <code>curl_virginia.csv</code>, o
+  <input type="file" id="file" accept=".csv" multiple>
+  <div class="small">Si abres esta página desde un servidor local (<code>python3 -m http.server</code>) los carga solos desde <code>data/raw/</code>.</div>
+  <div id="msg"></div>
+</div>
+
+<div class="card filters">
+  <label>Ruta
+    <select id="fPath"></select>
+  </label>
+  <label>Métrica
+    <select id="fMetric">
+      <option value="ttfb_s">TTFB (primer byte)</option>
+      <option value="connect_s">Conexión TCP</option>
+      <option value="total_s">Tiempo total</option>
+    </select>
+  </label>
+  <label>ISP / red
+    <select id="fIsp"></select>
+  </label>
+</div>
+
+<div class="row" id="kpis"></div>
+
+<div class="card"><h2>Percentiles: p50, p95, p99 (ms, menos es mejor)</h2><div class="chartbox"><canvas id="cPct"></canvas></div></div>
+<div class="card"><h2>Latencia a lo largo del tiempo (ms)</h2><div class="chartbox"><canvas id="cTime"></canvas></div></div>
+<div class="card"><h2>Por ISP y tipo de red (p50, ms)</h2><div class="chartbox"><canvas id="cIsp"></canvas></div></div>
+
+<div class="card"><h2>Detalle</h2>
+<table id="tbl"></table>
+<p class="small">Jitter: promedio de la diferencia absoluta entre muestras consecutivas. Pérdida: porcentaje de respuestas distintas de HTTP 200 o sin respuesta.</p>
+</div>
+
+<p class="small">Resultados dependen del ISP, la ciudad y la hora. Local Zone: <code>us-east-1-bog-1a</code> (región padre us-east-1). Datos crudos disponibles en los CSV.</p>
+</main>
+
+<script>
+const COLORS = { bogota: '#2f81f7', virginia: '#a371f7' };
+const NAMES = { bogota: 'Bogotá (Local Zone)', virginia: 'Virginia (us-east-1)' };
+let rows = []; const charts = {};
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const head = lines.shift().split(',');
+  return lines.filter(Boolean).map(l => {
+    const c = l.split(','); const o = {};
+    head.forEach((h, i) => o[h] = c[i]);
+    o.code = o.http_code; o.t = Date.parse(o.ts);
+    ['connect_s', 'ttfb_s', 'total_s'].forEach(k => o[k] = o[k] === '' || o[k] === undefined ? NaN : parseFloat(o[k]) * 1000);
+    o.group = `${o.isp} / ${o.net}`;
+    o.ok = o.code === '200' && !isNaN(o.ttfb_s);
+    return o;
+  });
+}
+const pct = (arr, p) => { if (!arr.length) return NaN; const s = [...arr].sort((a,b)=>a-b); const i = (s.length-1)*p/100; const lo=Math.floor(i), hi=Math.ceil(i); return s[lo]+(s[hi]-s[lo])*(i-lo); };
+function jitter(rs, m) { const v = rs.filter(r=>r.ok).sort((a,b)=>a.t-b.t).map(r=>r[m]); if (v.length<2) return NaN; let s=0; for (let i=1;i<v.length;i++) s+=Math.abs(v[i]-v[i-1]); return s/(v.length-1); }
+function stats(rs, m) {
+  const v = rs.filter(r=>r.ok).map(r=>r[m]);
+  return { n: rs.length, p50: pct(v,50), p95: pct(v,95), p99: pct(v,99), jit: jitter(rs,m), loss: rs.length ? 100*(rs.length-v.length)/rs.length : NaN };
+}
+const f1 = x => isNaN(x) ? '-' : x.toFixed(1);
+
+function filtered() {
+  const path = fPath.value, isp = fIsp.value;
+  return rows.filter(r => r.path === path && (isp === 'all' || r.group === isp));
+}
+function fillSelect(sel, vals, keepAll) {
+  const cur = sel.value; sel.innerHTML = '';
+  if (keepAll) sel.add(new Option('Todos', 'all'));
+  vals.forEach(v => sel.add(new Option(v, v)));
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function setupFilters() {
+  fillSelect(fPath, [...new Set(rows.map(r=>r.path))].sort(), false);
+  fillSelect(fIsp, [...new Set(rows.map(r=>r.group))].sort(), true);
+}
+
+function chart(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), cfg); }
+const gridOpts = { color: '#2a3948' }, tick = { color: '#9fb0c0' };
+const scales = (t) => ({ x: { grid: gridOpts, ticks: tick }, y: { grid: gridOpts, ticks: tick, title: { display: !!t, text: t, color: '#9fb0c0' }, beginAtZero: true } });
+
+function render() {
+  if (!rows.length) return;
+  const m = fMetric.value, data = filtered();
+  const labels = [...new Set(rows.map(r=>r.label))].filter(l=>NAMES[l]);
+  const by = {}; labels.forEach(l => by[l] = data.filter(r=>r.label===l));
+  const S = {}; labels.forEach(l => S[l] = stats(by[l], m));
+
+  // KPIs
+  const k = document.getElementById('kpis'); k.innerHTML = '';
+  if (S.bogota && S.virginia && !isNaN(S.bogota.p50) && !isNaN(S.virginia.p50)) {
+    const imp = (a,b) => 100*(b-a)/b;
+    const i50 = imp(S.bogota.p50, S.virginia.p50), i95 = imp(S.bogota.p95, S.virginia.p95);
+    const diff = S.virginia.p50 - S.bogota.p50;
+    const col = i50 > 30 ? 'ok' : i50 > 10 ? 'acc' : '';
+    k.innerHTML += `<div class="card"><div class="kpi ${col}">${i50>=0?'-':'+'}${Math.abs(i50).toFixed(0)}%</div><div>Latencia mediana (p50)</div><div class="small">${f1(diff)} ms de diferencia a favor de ${diff>=0?'Bogotá':'Virginia'}</div></div>`;
+    k.innerHTML += `<div class="card"><div class="kpi ${i95>30?'ok':i95>10?'acc':''}">${i95>=0?'-':'+'}${Math.abs(i95).toFixed(0)}%</div><div>Peor caso (p95)</div><div class="small">${f1(S.bogota.p95)} ms vs ${f1(S.virginia.p95)} ms</div></div>`;
+  }
+  labels.forEach(l => k.innerHTML += `<div class="card"><div class="kpi" style="color:${COLORS[l]}">${f1(S[l].p50)} ms</div><div>${NAMES[l]}</div><div class="small">p50 · ${S[l].n} muestras · jitter ${f1(S[l].jit)} ms · pérdida ${f1(S[l].loss)}%</div></div>`);
+
+  // Percentiles
+  chart('cPct', { type: 'bar', data: { labels: ['p50','p95','p99'], datasets: labels.map(l => ({ label: NAMES[l], backgroundColor: COLORS[l], data: [S[l].p50, S[l].p95, S[l].p99] })) }, options: { maintainAspectRatio:false, scales: scales('ms'), plugins: { legend: { labels: { color:'#e6edf3' } } } } });
+
+  // Tiempo
+  chart('cTime', { type: 'line', data: { datasets: labels.map(l => ({ label: NAMES[l], borderColor: COLORS[l], backgroundColor: COLORS[l], pointRadius: 2, borderWidth: 1.5, data: by[l].filter(r=>r.ok).sort((a,b)=>a.t-b.t).map(r => ({ x: r.t, y: r[m] })) })) }, options: { maintainAspectRatio:false, parsing:false, scales: { x: { type: 'linear', grid: gridOpts, ticks: { color:'#9fb0c0', callback: v => new Date(v).toLocaleTimeString() } }, y: { grid: gridOpts, ticks: tick, beginAtZero: true, title:{display:true,text:'ms',color:'#9fb0c0'} } }, plugins: { legend: { labels: { color:'#e6edf3' } } } } });
+
+  // Por ISP (ignora filtro ISP)
+  const path = fPath.value, groups = [...new Set(rows.map(r=>r.group))].sort();
+  chart('cIsp', { type: 'bar', data: { labels: groups, datasets: labels.map(l => ({ label: NAMES[l], backgroundColor: COLORS[l], data: groups.map(g => stats(rows.filter(r=>r.path===path && r.label===l && r.group===g), m).p50) })) }, options: { maintainAspectRatio:false, scales: scales('ms'), plugins: { legend: { labels: { color:'#e6edf3' } } } } });
+
+  // Tabla
+  const t = document.getElementById('tbl');
+  t.innerHTML = '<tr><th>Ubicación</th><th>Muestras</th><th>p50</th><th>p95</th><th>p99</th><th>Jitter</th><th>Pérdida</th></tr>' +
+    labels.map(l => `<tr><td>${NAMES[l]}</td><td>${S[l].n}</td><td>${f1(S[l].p50)}</td><td>${f1(S[l].p95)}</td><td>${f1(S[l].p99)}</td><td>${f1(S[l].jit)}</td><td>${f1(S[l].loss)}%</td></tr>`).join('');
+}
+
+function load(newRows, note) {
+  const keep = rows.filter(r => !newRows.some(n => n.label === r.label));
+  rows = keep.concat(newRows); setupFilters(); render();
+  document.getElementById('msg').textContent = note || '';
+}
+[fPath, fMetric, fIsp].forEach(e => e.addEventListener('change', render));
+
+async function readFiles(files) {
+  for (const f of files) load(parseCSV(await f.text()), `Cargado: ${f.name}`);
+}
+document.getElementById('file').addEventListener('change', e => readFiles(e.target.files));
+const drop = document.getElementById('drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); readFiles(e.dataTransfer.files); });
+
+(async () => {
+  if (location.protocol === 'file:') return;
+  for (const l of ['bogota', 'virginia']) {
+    try { const r = await fetch(`data/raw/curl_${l}.csv`); if (r.ok) load(parseCSV(await r.text()), 'Datos cargados desde data/raw/'); } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>

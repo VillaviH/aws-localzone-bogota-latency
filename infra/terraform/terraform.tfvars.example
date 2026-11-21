@@ -1,0 +1,5 @@
+# Copia a terraform.tfvars y ajusta. / Copy to terraform.tfvars and adjust.
+aws_profile = "your-profile"
+# local_zone  = "us-east-1-bog-1a"
+# virginia_az = "us-east-1b"   # parent zone of the Local Zone in YOUR account
+# allowed_cidrs = ["0.0.0.0/0"] # app requires x-probe-token anyway
