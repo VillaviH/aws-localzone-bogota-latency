@@ -48,6 +48,11 @@ Use your real ISP name instead of `<ISP>` (e.g. `MYISP`), keep it consistent, an
 
 **When finished: `terraform destroy`.** Instances are billed per hour. You can also stop them between sessions (public IPs change on restart; run `terraform apply -refresh-only` to refresh the outputs).
 
+## Extra tests (enabled by default)
+- **HTTPS:** both EC2 also serve HTTPS on 443 with a self-signed certificate (no domain needed). Measure with the 7th argument: `./scripts/measure.sh bogota <IP> <ISP> <fibra|movil> 100 2 https`. Each sample is a new connection, so TTFB includes TCP and TLS handshakes.
+- **CloudFront vs Local Zone:** a CloudFront distribution sits in front of the Virginia instance (`terraform output cloudfront_domain`). Measure cacheable paths: `./scripts/measure.sh cloudfront <DOMAIN> <ISP> <fibra|movil> 100 2 https "/cached /cached-payload"`. The CSV records the edge location (`pop`) and cache status. Disable with `enable_cloudfront = false`.
+- **App in Bogotá, database in Virginia:** `/upstream?n=10` on the Bogotá instance makes N sequential calls to the Virginia instance over the private network. Run `./scripts/measure_upstream.sh <BOGOTA_IP> <ISP> <fibra|movil>`. The dashboard shows how many queries per request it takes for Virginia to win again. Disable with `enable_upstream_test = false`.
+
 ## Dashboard
 `dashboard.html` reads the CSVs in the browser (nothing is uploaded). Serve the folder (`python3 -m http.server`) and open `/dashboard.html`, or drag your CSVs onto the page. It shows p50/p95/p99, jitter, packet loss, time series and per-ISP comparison. To host it, use GitHub Pages or an S3 bucket behind CloudFront.
 

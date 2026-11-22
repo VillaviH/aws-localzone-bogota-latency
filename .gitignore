@@ -8,3 +8,4 @@ crash.log
 # Borradores de publicación / publication drafts
 docs/blog-*.md
 docs/linkedin-*.md
+*.docx

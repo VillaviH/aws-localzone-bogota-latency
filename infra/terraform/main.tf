@@ -75,6 +75,9 @@ module "bogota" {
   allowed_cidrs = var.allowed_cidrs
   app_source    = local.app_source
   probe_token   = random_password.probe_token.result
+  vpc_cidr      = aws_vpc.use1.cidr_block
+  # La app de Bogotá consulta a Virginia por IP privada (simula una BD en la región padre)
+  upstream_url = var.enable_upstream_test ? "http://${module.virginia.private_ip}" : ""
 }
 
 module "virginia" {
@@ -87,4 +90,77 @@ module "virginia" {
   allowed_cidrs = var.allowed_cidrs
   app_source    = local.app_source
   probe_token   = random_password.probe_token.result
+  vpc_cidr      = aws_vpc.use1.cidr_block
+}
+
+# ---------- CloudFront delante de Virginia ----------
+# El token se valida en el borde (CloudFront Function) y se reenvía al origen como header.
+resource "aws_cloudfront_function" "guard" {
+  count   = var.enable_cloudfront ? 1 : 0
+  name    = "probe-token-guard"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-JS
+    function handler(event) {
+      var h = event.request.headers;
+      if (!h['x-probe-token'] || h['x-probe-token'].value !== '${random_password.probe_token.result}') {
+        return { statusCode: 403, statusDescription: 'Forbidden' };
+      }
+      return event.request;
+    }
+  JS
+}
+
+resource "aws_cloudfront_cache_policy" "respect_origin" {
+  count       = var.enable_cloudfront ? 1 : 0
+  name        = "probe-respect-origin"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 3600
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config { cookie_behavior = "none" }
+    headers_config { header_behavior = "none" }
+    query_strings_config { query_string_behavior = "none" }
+  }
+}
+
+resource "aws_cloudfront_distribution" "cdn" {
+  count       = var.enable_cloudfront ? 1 : 0
+  enabled     = true
+  comment     = "latency probe: CloudFront -> Virginia"
+  price_class = "PriceClass_All" # incluye bordes de Sudamérica
+
+  origin {
+    domain_name = module.virginia.public_dns
+    origin_id   = "virginia"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+    custom_header {
+      name  = "x-probe-token"
+      value = random_password.probe_token.result
+    }
+  }
+
+  default_cache_behavior {
+    target_origin_id       = "virginia"
+    viewer_protocol_policy = "allow-all"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.respect_origin[0].id
+    compress               = false
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.guard[0].arn
+    }
+  }
+
+  restrictions {
+    geo_restriction { restriction_type = "none" }
+  }
+
+  viewer_certificate { cloudfront_default_certificate = true }
 }

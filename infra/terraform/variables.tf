@@ -26,3 +26,15 @@ variable "allowed_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "enable_cloudfront" {
+  description = "Crea una distribución de CloudFront delante de Virginia para compararla con la Local Zone."
+  type        = bool
+  default     = true
+}
+
+variable "enable_upstream_test" {
+  description = "Permite que la app de Bogotá consulte a Virginia por IP privada (simula una BD en la región padre)."
+  type        = bool
+  default     = true
+}

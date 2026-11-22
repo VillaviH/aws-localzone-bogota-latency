@@ -11,6 +11,11 @@ variable "vpc_id" { type = string }
 variable "subnet_id" { type = string }
 variable "allowed_cidrs" { type = list(string) }
 variable "app_source" { type = string }
+variable "vpc_cidr" { type = string }
+variable "upstream_url" {
+  type    = string
+  default = ""
+}
 variable "probe_token" {
   type      = string
   sensitive = true
@@ -29,6 +34,19 @@ resource "aws_security_group" "this" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    description = "Trafico interno de la VPC (prueba upstream)"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
   }
   ingress {
     description = "ICMP para ping/mtr"
@@ -51,6 +69,7 @@ resource "aws_instance" "this" {
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [aws_security_group.this.id]
   associate_public_ip_address = true
+  user_data_replace_on_change = true
 
   root_block_device {
     volume_size = 8
@@ -74,11 +93,14 @@ resource "aws_instance" "this" {
     [Service]
     Environment=LOCATION=${var.location}
     Environment=PROBE_TOKEN=${var.probe_token}
+    Environment=UPSTREAM_URL=${var.upstream_url}
     ExecStart=/usr/bin/node /opt/app/server.js
     Restart=always
     [Install]
     WantedBy=multi-user.target
     UNIT
+    mkdir -p /opt/app/certs
+    openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=probe" -keyout /opt/app/certs/key.pem -out /opt/app/certs/cert.pem
     systemctl daemon-reload
     systemctl enable --now probe
   EOT
@@ -87,3 +109,5 @@ resource "aws_instance" "this" {
 }
 
 output "public_ip" { value = aws_instance.this.public_ip }
+output "public_dns" { value = aws_instance.this.public_dns }
+output "private_ip" { value = aws_instance.this.private_ip }

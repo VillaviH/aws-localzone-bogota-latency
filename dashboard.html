@@ -37,14 +37,14 @@
 <p class="sub">Medido desde Ecuador. Mismo cliente, misma app, mismo tipo de instancia (<code>c7i.large</code>). Los datos se leen de los CSV de <code>scripts/measure.sh</code>.</p>
 
 <div id="drop">
-  Arrastra aquí <code>curl_bogota.csv</code> y <code>curl_virginia.csv</code>, o
+  Arrastra aquí <code>curl_bogota.csv</code>, <code>curl_virginia.csv</code> (y opcionalmente <code>curl_cloudfront.csv</code> y <code>curl_upstream.csv</code>), o
   <input type="file" id="file" accept=".csv" multiple>
   <div class="small">Si abres esta página desde un servidor local (<code>python3 -m http.server</code>) los carga solos desde <code>data/raw/</code>.</div>
   <div id="msg"></div>
 </div>
 
 <div class="card filters">
-  <label>Ruta
+  <label>Prueba (protocolo y ruta)
     <select id="fPath"></select>
   </label>
   <label>Métrica
@@ -52,6 +52,7 @@
       <option value="ttfb_s">TTFB (primer byte)</option>
       <option value="connect_s">Conexión TCP</option>
       <option value="total_s">Tiempo total</option>
+      <option value="tls_s">Handshake TLS (solo https)</option>
     </select>
   </label>
   <label>ISP / red
@@ -65,6 +66,10 @@
 <div class="card"><h2>Latencia a lo largo del tiempo (ms)</h2><div class="chartbox"><canvas id="cTime"></canvas></div></div>
 <div class="card"><h2>Por ISP y tipo de red (p50, ms)</h2><div class="chartbox"><canvas id="cIsp"></canvas></div></div>
 
+<div class="card" id="upCard" style="display:none"><h2>Aplicación en Bogotá con la base de datos en Virginia</h2>
+<div id="upBox"></div>
+<p class="small">Simulación: la app en Bogotá hace N consultas seguidas a Virginia por la red interna de AWS (conexión reutilizada). Se compara con tener app y base de datos juntas en Virginia (consultas locales, menos de 1 ms). Usa el filtro de ISP.</p></div>
+
 <div class="card"><h2>Detalle</h2>
 <table id="tbl"></table>
 <p class="small">Jitter: promedio de la diferencia absoluta entre muestras consecutivas. Pérdida: porcentaje de respuestas distintas de HTTP 200 o sin respuesta.</p>
@@ -74,8 +79,9 @@
 </main>
 
 <script>
-const COLORS = { bogota: '#2f81f7', virginia: '#a371f7' };
-const NAMES = { bogota: 'Bogotá (Local Zone)', virginia: 'Virginia (us-east-1)' };
+const COLORS = { bogota: '#2f81f7', virginia: '#a371f7', cloudfront: '#ff9900' };
+const NAMES = { bogota: 'Bogotá (Local Zone)', virginia: 'Virginia (us-east-1)', cloudfront: 'Virginia + CloudFront' };
+let upRows = [];
 let rows = []; const charts = {};
 
 function parseCSV(text) {
@@ -85,23 +91,25 @@ function parseCSV(text) {
     const c = l.split(','); const o = {};
     head.forEach((h, i) => o[h] = c[i]);
     o.code = o.http_code; o.t = Date.parse(o.ts);
-    ['connect_s', 'ttfb_s', 'total_s'].forEach(k => o[k] = o[k] === '' || o[k] === undefined ? NaN : parseFloat(o[k]) * 1000);
+    o.proto = o.proto || 'http'; o.route = `${o.proto} ${o.path}`;
+    ['connect_s', 'ttfb_s', 'total_s', 'appconnect_s'].forEach(k => o[k] = o[k] === '' || o[k] === undefined ? NaN : parseFloat(o[k]) * 1000);
+    o.tls_s = o.proto === 'https' ? o.appconnect_s - o.connect_s : NaN;
     o.group = `${o.isp} / ${o.net}`;
     o.ok = o.code === '200' && !isNaN(o.ttfb_s);
     return o;
   });
 }
 const pct = (arr, p) => { if (!arr.length) return NaN; const s = [...arr].sort((a,b)=>a-b); const i = (s.length-1)*p/100; const lo=Math.floor(i), hi=Math.ceil(i); return s[lo]+(s[hi]-s[lo])*(i-lo); };
-function jitter(rs, m) { const v = rs.filter(r=>r.ok).sort((a,b)=>a.t-b.t).map(r=>r[m]); if (v.length<2) return NaN; let s=0; for (let i=1;i<v.length;i++) s+=Math.abs(v[i]-v[i-1]); return s/(v.length-1); }
+function jitter(rs, m) { const v = rs.filter(r=>r.ok && !isNaN(r[m])).sort((a,b)=>a.t-b.t).map(r=>r[m]); if (v.length<2) return NaN; let s=0; for (let i=1;i<v.length;i++) s+=Math.abs(v[i]-v[i-1]); return s/(v.length-1); }
 function stats(rs, m) {
-  const v = rs.filter(r=>r.ok).map(r=>r[m]);
-  return { n: rs.length, p50: pct(v,50), p95: pct(v,95), p99: pct(v,99), jit: jitter(rs,m), loss: rs.length ? 100*(rs.length-v.length)/rs.length : NaN };
+  const v = rs.filter(r=>r.ok && !isNaN(r[m])).map(r=>r[m]);
+  return { n: rs.length, p50: pct(v,50), p95: pct(v,95), p99: pct(v,99), jit: jitter(rs,m), loss: rs.length ? 100*rs.filter(r=>!r.ok).length/rs.length : NaN };
 }
 const f1 = x => isNaN(x) ? '-' : x.toFixed(1);
 
 function filtered() {
   const path = fPath.value, isp = fIsp.value;
-  return rows.filter(r => r.path === path && (isp === 'all' || r.group === isp));
+  return rows.filter(r => r.route === path && (isp === 'all' || r.group === isp));
 }
 function fillSelect(sel, vals, keepAll) {
   const cur = sel.value; sel.innerHTML = '';
@@ -110,7 +118,7 @@ function fillSelect(sel, vals, keepAll) {
   if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
 }
 function setupFilters() {
-  fillSelect(fPath, [...new Set(rows.map(r=>r.path))].sort(), false);
+  fillSelect(fPath, [...new Set(rows.map(r=>r.route))].sort(), false);
   fillSelect(fIsp, [...new Set(rows.map(r=>r.group))].sort(), true);
 }
 
@@ -135,6 +143,11 @@ function render() {
     k.innerHTML += `<div class="card"><div class="kpi ${col}">${i50>=0?'-':'+'}${Math.abs(i50).toFixed(0)}%</div><div>Latencia mediana (p50)</div><div class="small">${f1(diff)} ms de diferencia a favor de ${diff>=0?'Bogotá':'Virginia'}</div></div>`;
     k.innerHTML += `<div class="card"><div class="kpi ${i95>30?'ok':i95>10?'acc':''}">${i95>=0?'-':'+'}${Math.abs(i95).toFixed(0)}%</div><div>Peor caso (p95)</div><div class="small">${f1(S.bogota.p95)} ms vs ${f1(S.virginia.p95)} ms</div></div>`;
   }
+  if (S.cloudfront && S.virginia && !isNaN(S.cloudfront.p50) && !isNaN(S.virginia.p50)) {
+    const ic = 100*(S.virginia.p50 - S.cloudfront.p50)/S.virginia.p50;
+    const pops = [...new Set(by.cloudfront.map(r=>r.pop).filter(Boolean))].join(', ') || 'n/d';
+    k.innerHTML += `<div class="card"><div class="kpi acc">${ic>=0?'-':'+'}${Math.abs(ic).toFixed(0)}%</div><div>CloudFront vs Virginia directo (p50)</div><div class="small">Punto de presencia (POP): ${pops}</div></div>`;
+  }
   labels.forEach(l => k.innerHTML += `<div class="card"><div class="kpi" style="color:${COLORS[l]}">${f1(S[l].p50)} ms</div><div>${NAMES[l]}</div><div class="small">p50 · ${S[l].n} muestras · jitter ${f1(S[l].jit)} ms · pérdida ${f1(S[l].loss)}%</div></div>`);
 
   // Percentiles
@@ -145,7 +158,7 @@ function render() {
 
   // Por ISP (ignora filtro ISP)
   const path = fPath.value, groups = [...new Set(rows.map(r=>r.group))].sort();
-  chart('cIsp', { type: 'bar', data: { labels: groups, datasets: labels.map(l => ({ label: NAMES[l], backgroundColor: COLORS[l], data: groups.map(g => stats(rows.filter(r=>r.path===path && r.label===l && r.group===g), m).p50) })) }, options: { maintainAspectRatio:false, scales: scales('ms'), plugins: { legend: { labels: { color:'#e6edf3' } } } } });
+  chart('cIsp', { type: 'bar', data: { labels: groups, datasets: labels.map(l => ({ label: NAMES[l], backgroundColor: COLORS[l], data: groups.map(g => stats(rows.filter(r=>r.route===path && r.label===l && r.group===g), m).p50) })) }, options: { maintainAspectRatio:false, scales: scales('ms'), plugins: { legend: { labels: { color:'#e6edf3' } } } } });
 
   // Tabla
   const t = document.getElementById('tbl');
@@ -153,15 +166,40 @@ function render() {
     labels.map(l => `<tr><td>${NAMES[l]}</td><td>${S[l].n}</td><td>${f1(S[l].p50)}</td><td>${f1(S[l].p95)}</td><td>${f1(S[l].p99)}</td><td>${f1(S[l].jit)}</td><td>${f1(S[l].loss)}%</td></tr>`).join('');
 }
 
+function renderUpstream() {
+  const card = document.getElementById('upCard');
+  const isp = fIsp.value;
+  const ups = upRows.filter(r => isp === 'all' || `${r.isp} / ${r.net}` === isp);
+  if (!ups.length) { card.style.display = 'none'; return; }
+  const per = pct(ups.map(r => r.per).filter(x => !isNaN(x)), 50);
+  const ping = l => pct(rows.filter(r => r.label===l && r.route==='http /ping' && r.ok && (isp==='all' || r.group===isp)).map(r=>r.ttfb_s), 50);
+  const B = ping('bogota'), V = ping('virginia');
+  if (isNaN(per) || isNaN(B) || isNaN(V)) { card.style.display = 'none'; return; }
+  const be = B < V ? Math.floor((V - B) / per) : 0;
+  const line = n => `<tr><td>${n}</td><td>${f1(B + n*per)}</td><td>${f1(V)}</td><td>${B + n*per < V ? 'Bogotá' : 'Virginia'}</td></tr>`;
+  document.getElementById('upBox').innerHTML = `<div class="row"><div class="card"><div class="kpi acc">${f1(per)} ms</div><div>Costo de cada consulta Bogotá a Virginia</div><div class="small">mediana de ${ups.length} muestras</div></div>
+  <div class="card"><div class="kpi ${be>0?'ok':''}">${be>0?be:'0'}</div><div>Consultas hasta perder la ventaja</div><div class="small">${be>0?'Con más de '+be+' consultas por petición, Virginia gana':'Bogotá no tiene ventaja de entrada'}</div></div></div>
+  <table><tr><th>Consultas por petición</th><th>Bogotá, BD en Virginia (ms)</th><th>Virginia, BD local (ms)</th><th>Más rápido</th></tr>${[1,5,10,20,50].map(line).join('')}</table>`;
+  card.style.display = '';
+}
+function parseUp(text) {
+  return parseCSV(text).map(o => ({ ts:o.ts, isp:o.isp, net:o.net, per: parseFloat(o.per_query_ms) }));
+}
+
 function load(newRows, note) {
   const keep = rows.filter(r => !newRows.some(n => n.label === r.label));
-  rows = keep.concat(newRows); setupFilters(); render();
+  rows = keep.concat(newRows); setupFilters(); render(); renderUpstream();
   document.getElementById('msg').textContent = note || '';
 }
-[fPath, fMetric, fIsp].forEach(e => e.addEventListener('change', render));
+[fPath, fMetric].forEach(e => e.addEventListener('change', render));
+fIsp.addEventListener('change', () => { render(); renderUpstream(); });
 
 async function readFiles(files) {
-  for (const f of files) load(parseCSV(await f.text()), `Cargado: ${f.name}`);
+  for (const f of files) {
+    const text = await f.text();
+    if (/upstream/i.test(f.name)) { upRows = parseUp(text); renderUpstream(); document.getElementById('msg').textContent = `Cargado: ${f.name}`; }
+    else load(parseCSV(text), `Cargado: ${f.name}`);
+  }
 }
 document.getElementById('file').addEventListener('change', e => readFiles(e.target.files));
 const drop = document.getElementById('drop');
@@ -171,7 +209,8 @@ drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('
 
 (async () => {
   if (location.protocol === 'file:') return;
-  for (const l of ['bogota', 'virginia']) {
+  try { const r = await fetch('data/raw/curl_upstream.csv'); if (r.ok) { upRows = parseUp(await r.text()); } } catch (e) {}
+  for (const l of ['bogota', 'virginia', 'cloudfront']) {
     try { const r = await fetch(`data/raw/curl_${l}.csv`); if (r.ok) load(parseCSV(await r.text()), 'Datos cargados desde data/raw/'); } catch (e) {}
   }
 })();

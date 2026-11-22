@@ -4,3 +4,4 @@ output "probe_token" {
   value     = random_password.probe_token.result
   sensitive = true
 }
+output "cloudfront_domain" { value = var.enable_cloudfront ? aws_cloudfront_distribution.cdn[0].domain_name : null }
