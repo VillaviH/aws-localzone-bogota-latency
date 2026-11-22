@@ -4,4 +4,7 @@ output "probe_token" {
   value     = random_password.probe_token.result
   sensitive = true
 }
-output "cloudfront_domain" { value = var.enable_cloudfront ? aws_cloudfront_distribution.cdn[0].domain_name : null }
+output "bogota_alb" { value = module.alb_bogota.dns_name }
+output "virginia_alb" { value = module.alb_virginia.dns_name }
+output "bogota_bucket" { value = aws_s3_directory_bucket.bogota.bucket }
+output "virginia_bucket" { value = aws_s3_bucket.virginia.bucket }

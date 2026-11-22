@@ -16,8 +16,38 @@ resource "random_password" "probe_token" {
   special = false
 }
 
+resource "random_id" "bucket" {
+  byte_length = 4
+}
+
+data "aws_availability_zone" "lz" {
+  name                   = var.local_zone
+  all_availability_zones = true
+}
+
 locals {
-  app_source = "${path.module}/../../app/server.js"
+  bucket_lz = "lzprobe-${random_id.bucket.hex}--${data.aws_availability_zone.lz.zone_id}--x-s3"
+  bucket_va = "lzprobe-${random_id.bucket.hex}-use1"
+
+  app_source     = "${path.module}/../../app/server.js"
+  package_source = "${path.module}/../../app/package.json"
+}
+
+# Bogotá: bucket de directorio en la Local Zone (S3 One Zone-IA)
+resource "aws_s3_directory_bucket" "bogota" {
+  bucket          = local.bucket_lz
+  data_redundancy = "SingleLocalZone"
+  force_destroy   = true
+  location {
+    name = data.aws_availability_zone.lz.zone_id
+    type = "LocalZone"
+  }
+}
+
+# Virginia: bucket regional; la app escribe con la clase ONEZONE_IA para comparar igual
+resource "aws_s3_bucket" "virginia" {
+  bucket        = local.bucket_va
+  force_destroy = true
 }
 
 # us-east-1: una VPC con subred regional y subred en la Local Zone
@@ -55,6 +85,19 @@ resource "aws_subnet" "bogota" {
   tags                    = { Name = "bogota-lz" }
 }
 
+resource "aws_subnet" "virginia_b" {
+  vpc_id                  = aws_vpc.use1.id
+  cidr_block              = "10.10.0.128/26"
+  availability_zone       = var.virginia_az_2
+  map_public_ip_on_launch = true
+  tags                    = { Name = "virginia-b" }
+}
+
+resource "aws_route_table_association" "virginia_b" {
+  subnet_id      = aws_subnet.virginia_b.id
+  route_table_id = aws_route_table.use1.id
+}
+
 resource "aws_route_table_association" "virginia" {
   subnet_id      = aws_subnet.virginia.id
   route_table_id = aws_route_table.use1.id
@@ -66,101 +109,59 @@ resource "aws_route_table_association" "bogota" {
 }
 
 module "bogota" {
-  source        = "./modules/site"
-  name          = "probe-bogota-lz"
-  location      = "bogota-lz"
-  instance_type = var.instance_type
-  vpc_id        = aws_vpc.use1.id
-  subnet_id     = aws_subnet.bogota.id
-  allowed_cidrs = var.allowed_cidrs
-  app_source    = local.app_source
-  probe_token   = random_password.probe_token.result
-  vpc_cidr      = aws_vpc.use1.cidr_block
+  source         = "./modules/site"
+  name           = "probe-bogota-lz"
+  location       = "bogota-lz"
+  instance_type  = var.instance_type
+  vpc_id         = aws_vpc.use1.id
+  subnet_id      = aws_subnet.bogota.id
+  allowed_cidrs  = var.allowed_cidrs
+  app_source     = local.app_source
+  package_source = local.package_source
+  probe_token    = random_password.probe_token.result
+  vpc_cidr       = aws_vpc.use1.cidr_block
+  bucket_name    = aws_s3_directory_bucket.bogota.bucket
+  bucket_arn     = aws_s3_directory_bucket.bogota.arn
+  bucket_kind    = "directory"
+  # Permite medir la app de Bogotá contra el bucket regional (datos en la región padre)
+  parent_bucket_name = aws_s3_bucket.virginia.bucket
+  parent_bucket_arn  = aws_s3_bucket.virginia.arn
   # La app de Bogotá consulta a Virginia por IP privada (simula una BD en la región padre)
   upstream_url = var.enable_upstream_test ? "http://${module.virginia.private_ip}" : ""
 }
 
 module "virginia" {
-  source        = "./modules/site"
-  name          = "probe-virginia"
-  location      = "us-east-1"
-  instance_type = var.instance_type
+  source         = "./modules/site"
+  name           = "probe-virginia"
+  location       = "us-east-1"
+  instance_type  = var.instance_type
+  vpc_id         = aws_vpc.use1.id
+  subnet_id      = aws_subnet.virginia.id
+  allowed_cidrs  = var.allowed_cidrs
+  app_source     = local.app_source
+  package_source = local.package_source
+  probe_token    = random_password.probe_token.result
+  vpc_cidr       = aws_vpc.use1.cidr_block
+  bucket_name    = aws_s3_bucket.virginia.bucket
+  bucket_arn     = aws_s3_bucket.virginia.arn
+  bucket_kind    = "general"
+}
+
+# Balanceadores de carga (ELB): uno en la Local Zone y otro en Virginia
+module "alb_bogota" {
+  source        = "./modules/alb"
+  name          = "probe-alb-bogota"
   vpc_id        = aws_vpc.use1.id
-  subnet_id     = aws_subnet.virginia.id
+  subnet_ids    = [aws_subnet.bogota.id]
+  instance_id   = module.bogota.instance_id
   allowed_cidrs = var.allowed_cidrs
-  app_source    = local.app_source
-  probe_token   = random_password.probe_token.result
-  vpc_cidr      = aws_vpc.use1.cidr_block
 }
 
-# ---------- CloudFront delante de Virginia ----------
-# El token se valida en el borde (CloudFront Function) y se reenvía al origen como header.
-resource "aws_cloudfront_function" "guard" {
-  count   = var.enable_cloudfront ? 1 : 0
-  name    = "probe-token-guard"
-  runtime = "cloudfront-js-2.0"
-  publish = true
-  code    = <<-JS
-    function handler(event) {
-      var h = event.request.headers;
-      if (!h['x-probe-token'] || h['x-probe-token'].value !== '${random_password.probe_token.result}') {
-        return { statusCode: 403, statusDescription: 'Forbidden' };
-      }
-      return event.request;
-    }
-  JS
-}
-
-resource "aws_cloudfront_cache_policy" "respect_origin" {
-  count       = var.enable_cloudfront ? 1 : 0
-  name        = "probe-respect-origin"
-  min_ttl     = 0
-  default_ttl = 0
-  max_ttl     = 3600
-  parameters_in_cache_key_and_forwarded_to_origin {
-    cookies_config { cookie_behavior = "none" }
-    headers_config { header_behavior = "none" }
-    query_strings_config { query_string_behavior = "none" }
-  }
-}
-
-resource "aws_cloudfront_distribution" "cdn" {
-  count       = var.enable_cloudfront ? 1 : 0
-  enabled     = true
-  comment     = "latency probe: CloudFront -> Virginia"
-  price_class = "PriceClass_All" # incluye bordes de Sudamérica
-
-  origin {
-    domain_name = module.virginia.public_dns
-    origin_id   = "virginia"
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "http-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-    custom_header {
-      name  = "x-probe-token"
-      value = random_password.probe_token.result
-    }
-  }
-
-  default_cache_behavior {
-    target_origin_id       = "virginia"
-    viewer_protocol_policy = "allow-all"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = aws_cloudfront_cache_policy.respect_origin[0].id
-    compress               = false
-    function_association {
-      event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.guard[0].arn
-    }
-  }
-
-  restrictions {
-    geo_restriction { restriction_type = "none" }
-  }
-
-  viewer_certificate { cloudfront_default_certificate = true }
+module "alb_virginia" {
+  source        = "./modules/alb"
+  name          = "probe-alb-virginia"
+  vpc_id        = aws_vpc.use1.id
+  subnet_ids    = [aws_subnet.virginia.id, aws_subnet.virginia_b.id]
+  instance_id   = module.virginia.instance_id
+  allowed_cidrs = var.allowed_cidrs
 }

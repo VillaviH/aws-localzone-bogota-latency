@@ -37,7 +37,7 @@
 <p class="sub">Medido desde Ecuador. Mismo cliente, misma app, mismo tipo de instancia (<code>c7i.large</code>). Los datos se leen de los CSV de <code>scripts/measure.sh</code>.</p>
 
 <div id="drop">
-  Arrastra aquí <code>curl_bogota.csv</code>, <code>curl_virginia.csv</code> (y opcionalmente <code>curl_cloudfront.csv</code> y <code>curl_upstream.csv</code>), o
+  Arrastra aquí <code>curl_bogota.csv</code>, <code>curl_virginia.csv</code> (y opcionalmente <code>curl_bogota-alb.csv</code>, <code>curl_virginia-alb.csv</code> y <code>curl_upstream.csv</code>), o
   <input type="file" id="file" accept=".csv" multiple>
   <div class="small">Si abres esta página desde un servidor local (<code>python3 -m http.server</code>) los carga solos desde <code>data/raw/</code>.</div>
   <div id="msg"></div>
@@ -53,6 +53,7 @@
       <option value="connect_s">Conexión TCP</option>
       <option value="total_s">Tiempo total</option>
       <option value="tls_s">Handshake TLS (solo https)</option>
+      <option value="s3_ms">Tiempo en S3 (medido en el servidor)</option>
     </select>
   </label>
   <label>ISP / red
@@ -79,8 +80,8 @@
 </main>
 
 <script>
-const COLORS = { bogota: '#2f81f7', virginia: '#a371f7', cloudfront: '#ff9900' };
-const NAMES = { bogota: 'Bogotá (Local Zone)', virginia: 'Virginia (us-east-1)', cloudfront: 'Virginia + CloudFront' };
+const COLORS = { bogota: '#2f81f7', virginia: '#a371f7', 'bogota-alb': '#79c0ff', 'virginia-alb': '#d2a8ff', 'bogota-parent-alb': '#3fb950' };
+const NAMES = { bogota: 'Bogotá (directo)', virginia: 'Virginia (directo)', 'bogota-alb': 'Bogotá vía ALB', 'virginia-alb': 'Virginia vía ALB', 'bogota-parent-alb': 'Bogotá → bucket regional (vía ALB)' };
 let upRows = [];
 let rows = []; const charts = {};
 
@@ -94,6 +95,7 @@ function parseCSV(text) {
     o.proto = o.proto || 'http'; o.route = `${o.proto} ${o.path}`;
     ['connect_s', 'ttfb_s', 'total_s', 'appconnect_s'].forEach(k => o[k] = o[k] === '' || o[k] === undefined ? NaN : parseFloat(o[k]) * 1000);
     o.tls_s = o.proto === 'https' ? o.appconnect_s - o.connect_s : NaN;
+    o.s3_ms = o.s3_ms === '' || o.s3_ms === undefined ? NaN : parseFloat(o.s3_ms);
     o.group = `${o.isp} / ${o.net}`;
     o.ok = o.code === '200' && !isNaN(o.ttfb_s);
     return o;
@@ -113,13 +115,24 @@ function filtered() {
 }
 function fillSelect(sel, vals, keepAll) {
   const cur = sel.value; sel.innerHTML = '';
-  if (keepAll) sel.add(new Option('Todos', 'all'));
   vals.forEach(v => sel.add(new Option(v, v)));
+  if (keepAll) sel.add(new Option('Todos (mezcla de ISPs, no comparable)', 'all'));
   if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
 }
+let touched = { path: false, isp: false };
 function setupFilters() {
-  fillSelect(fPath, [...new Set(rows.map(r=>r.route))].sort(), false);
+  const routes = [...new Set(rows.map(r=>r.route))].sort();
+  fillSelect(fPath, routes, false);
   fillSelect(fIsp, [...new Set(rows.map(r=>r.group))].sort(), true);
+  if (!touched.path) {
+    const pref = ['http /api/read?obj=large', 'http /ping'].find(x => routes.includes(x));
+    if (pref) fPath.value = pref;
+  }
+  if (!touched.isp && fIsp.options.length) fIsp.selectedIndex = 0; // primer ISP, no la mezcla
+  // Vistas compartibles: ?route=http /api/write?obj=large&metric=s3_ms&isp=ISP-A / fibra
+  const Q = new URLSearchParams(location.search);
+  const setIf = (sel, v, key) => { if (v && [...sel.options].some(o => o.value === v)) { sel.value = v; if (key) touched[key] = true; } };
+  setIf(fPath, Q.get('route'), 'path'); setIf(fIsp, Q.get('isp'), 'isp'); setIf(fMetric, Q.get('metric'));
 }
 
 function chart(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), cfg); }
@@ -129,32 +142,28 @@ const scales = (t) => ({ x: { grid: gridOpts, ticks: tick }, y: { grid: gridOpts
 function render() {
   if (!rows.length) return;
   const m = fMetric.value, data = filtered();
-  const labels = [...new Set(rows.map(r=>r.label))].filter(l=>NAMES[l]);
-  const by = {}; labels.forEach(l => by[l] = data.filter(r=>r.label===l));
+  const by = {};
+  const labels = [...new Set(rows.map(r=>r.label))].filter(l => NAMES[l]).filter(l => { by[l] = data.filter(r=>r.label===l); return by[l].length > 0; });
   const S = {}; labels.forEach(l => S[l] = stats(by[l], m));
 
   // KPIs
   const k = document.getElementById('kpis'); k.innerHTML = '';
-  if (S.bogota && S.virginia && !isNaN(S.bogota.p50) && !isNaN(S.virginia.p50)) {
-    const imp = (a,b) => 100*(b-a)/b;
-    const i50 = imp(S.bogota.p50, S.virginia.p50), i95 = imp(S.bogota.p95, S.virginia.p95);
-    const diff = S.virginia.p50 - S.bogota.p50;
+  [['bogota', 'virginia', ''], ['bogota-alb', 'virginia-alb', ' (vía ALB)']].forEach(([a, b, tag]) => {
+    if (!(S[a] && S[b] && !isNaN(S[a].p50) && !isNaN(S[b].p50))) return;
+    const imp = (x, y) => 100 * (y - x) / y;
+    const i50 = imp(S[a].p50, S[b].p50), i95 = imp(S[a].p95, S[b].p95);
+    const diff = S[b].p50 - S[a].p50;
     const col = i50 > 30 ? 'ok' : i50 > 10 ? 'acc' : '';
-    k.innerHTML += `<div class="card"><div class="kpi ${col}">${i50>=0?'-':'+'}${Math.abs(i50).toFixed(0)}%</div><div>Latencia mediana (p50)</div><div class="small">${f1(diff)} ms de diferencia a favor de ${diff>=0?'Bogotá':'Virginia'}</div></div>`;
-    k.innerHTML += `<div class="card"><div class="kpi ${i95>30?'ok':i95>10?'acc':''}">${i95>=0?'-':'+'}${Math.abs(i95).toFixed(0)}%</div><div>Peor caso (p95)</div><div class="small">${f1(S.bogota.p95)} ms vs ${f1(S.virginia.p95)} ms</div></div>`;
-  }
-  if (S.cloudfront && S.virginia && !isNaN(S.cloudfront.p50) && !isNaN(S.virginia.p50)) {
-    const ic = 100*(S.virginia.p50 - S.cloudfront.p50)/S.virginia.p50;
-    const pops = [...new Set(by.cloudfront.map(r=>r.pop).filter(Boolean))].join(', ') || 'n/d';
-    k.innerHTML += `<div class="card"><div class="kpi acc">${ic>=0?'-':'+'}${Math.abs(ic).toFixed(0)}%</div><div>CloudFront vs Virginia directo (p50)</div><div class="small">Punto de presencia (POP): ${pops}</div></div>`;
-  }
+    k.innerHTML += `<div class="card"><div class="kpi ${col}">${i50>=0?'-':'+'}${Math.abs(i50).toFixed(0)}%</div><div>Mediana (p50)${tag}</div><div class="small">${f1(Math.abs(diff))} ms a favor de ${diff>=0?'Bogotá':'Virginia'}</div></div>`;
+    k.innerHTML += `<div class="card"><div class="kpi ${i95>30?'ok':i95>10?'acc':''}">${i95>=0?'-':'+'}${Math.abs(i95).toFixed(0)}%</div><div>Peor caso (p95)${tag}</div><div class="small">${f1(S[a].p95)} ms vs ${f1(S[b].p95)} ms</div></div>`;
+  });
   labels.forEach(l => k.innerHTML += `<div class="card"><div class="kpi" style="color:${COLORS[l]}">${f1(S[l].p50)} ms</div><div>${NAMES[l]}</div><div class="small">p50 · ${S[l].n} muestras · jitter ${f1(S[l].jit)} ms · pérdida ${f1(S[l].loss)}%</div></div>`);
 
   // Percentiles
   chart('cPct', { type: 'bar', data: { labels: ['p50','p95','p99'], datasets: labels.map(l => ({ label: NAMES[l], backgroundColor: COLORS[l], data: [S[l].p50, S[l].p95, S[l].p99] })) }, options: { maintainAspectRatio:false, scales: scales('ms'), plugins: { legend: { labels: { color:'#e6edf3' } } } } });
 
   // Tiempo
-  chart('cTime', { type: 'line', data: { datasets: labels.map(l => ({ label: NAMES[l], borderColor: COLORS[l], backgroundColor: COLORS[l], pointRadius: 2, borderWidth: 1.5, data: by[l].filter(r=>r.ok).sort((a,b)=>a.t-b.t).map(r => ({ x: r.t, y: r[m] })) })) }, options: { maintainAspectRatio:false, parsing:false, scales: { x: { type: 'linear', grid: gridOpts, ticks: { color:'#9fb0c0', callback: v => new Date(v).toLocaleTimeString() } }, y: { grid: gridOpts, ticks: tick, beginAtZero: true, title:{display:true,text:'ms',color:'#9fb0c0'} } }, plugins: { legend: { labels: { color:'#e6edf3' } } } } });
+  chart('cTime', { type: 'line', data: { datasets: labels.map(l => ({ label: NAMES[l], borderColor: COLORS[l], backgroundColor: COLORS[l], pointRadius: 2.5, showLine: false, data: by[l].filter(r=>r.ok).sort((a,b)=>a.t-b.t).map(r => ({ x: r.t, y: r[m] })) })) }, options: { maintainAspectRatio:false, parsing:false, scales: { x: { type: 'linear', grid: gridOpts, ticks: { color:'#9fb0c0', callback: v => new Date(v).toLocaleTimeString() } }, y: { grid: gridOpts, ticks: tick, beginAtZero: true, title:{display:true,text:'ms',color:'#9fb0c0'} } }, plugins: { legend: { labels: { color:'#e6edf3' } } } } });
 
   // Por ISP (ignora filtro ISP)
   const path = fPath.value, groups = [...new Set(rows.map(r=>r.group))].sort();
@@ -191,8 +200,9 @@ function load(newRows, note) {
   rows = keep.concat(newRows); setupFilters(); render(); renderUpstream();
   document.getElementById('msg').textContent = note || '';
 }
-[fPath, fMetric].forEach(e => e.addEventListener('change', render));
-fIsp.addEventListener('change', () => { render(); renderUpstream(); });
+fPath.addEventListener('change', () => { touched.path = true; render(); });
+fMetric.addEventListener('change', render);
+fIsp.addEventListener('change', () => { touched.isp = true; render(); renderUpstream(); });
 
 async function readFiles(files) {
   for (const f of files) {
@@ -210,7 +220,7 @@ drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('
 (async () => {
   if (location.protocol === 'file:') return;
   try { const r = await fetch('data/raw/curl_upstream.csv'); if (r.ok) { upRows = parseUp(await r.text()); } } catch (e) {}
-  for (const l of ['bogota', 'virginia', 'cloudfront']) {
+  for (const l of ['bogota', 'virginia', 'bogota-alb', 'virginia-alb', 'bogota-parent-alb']) {
     try { const r = await fetch(`data/raw/curl_${l}.csv`); if (r.ok) load(parseCSV(await r.text()), 'Datos cargados desde data/raw/'); } catch (e) {}
   }
 })();

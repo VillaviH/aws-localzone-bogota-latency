@@ -15,6 +15,12 @@ variable "virginia_az" {
   default     = "us-east-1b"
 }
 
+variable "virginia_az_2" {
+  description = "Segunda AZ regional (el ALB de Virginia necesita dos)."
+  type        = string
+  default     = "us-east-1a"
+}
+
 variable "instance_type" {
   description = "Tipo más barato disponible en la Local Zone de Bogotá (no hay t3)."
   type        = string
@@ -27,11 +33,6 @@ variable "allowed_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "enable_cloudfront" {
-  description = "Crea una distribución de CloudFront delante de Virginia para compararla con la Local Zone."
-  type        = bool
-  default     = true
-}
 
 variable "enable_upstream_test" {
   description = "Permite que la app de Bogotá consulte a Virginia por IP privada (simula una BD en la región padre)."

@@ -7,19 +7,25 @@ Una prueba de latencia abierta y reproducible: **AWS Local Zone Bogotá** (`us-e
 Las primeras mediciones se hicieron en Ecuador (ISP-A fibra, ISP-B móvil 5G). Los resultados cambian mucho según el ISP; mira `data/raw/` y el dashboard.
 
 ## Qué despliega
-- 1 VPC (`10.10.0.0/24`) con dos subredes `/26`: una en la Local Zone y otra en una AZ regional.
-- 2 EC2 `c7i.large` (el tipo más barato disponible en la Local Zone de Bogotá; no hay t3), misma app Node, mismo tamaño.
-- Endpoints: `/ping` (JSON pequeño) y `/payload` (1 MB). Ambos exigen el header `x-probe-token`; sin él responden 403.
+La misma app pequeña se despliega dos veces, una en la Local Zone de Bogotá y otra en una AZ regional (Virginia), usando solo servicios que AWS lista como disponibles en la Local Zone de Bogotá:
+- **ELB:** un Application Load Balancer por ubicación.
+- **EC2:** una `c7i.large` por ubicación (el tipo más barato disponible en la zona; no hay t3). Misma app Node.
+- **S3 One Zone-IA:** un bucket de directorio dentro de la Local Zone y un bucket regional escrito con la misma clase de almacenamiento en Virginia.
+- VPC `10.10.0.0/24` con subredes `/26`. Endpoints: `/ping`, `/payload` (1 MB), `/api/read?obj=small|large` y `/api/write?obj=small|large` (S3), `/health` (sin token). Todo lo demás exige el header `x-probe-token`; sin él responde 403.
 
 ## Arquitectura
 ```mermaid
 flowchart LR
-  C["Tu cliente<br/>(laptop / celular)<br/>curl, ping, mtr"] --> I((Internet))
-  I --> B
-  I --> V
+  C["Tu cliente<br/>(laptop / celular)"] --> I((Internet))
+  I --> LB1
+  I --> LB2
   subgraph R["AWS us-east-1 · VPC 10.10.0.0/24"]
-    B["Local Zone Bogotá<br/>us-east-1-bog-1a<br/>EC2 c7i.large · Node"]
-    V["AZ regional (us-east-1b)<br/>EC2 c7i.large · Node"]
+    subgraph LZ["Local Zone Bogotá (us-east-1-bog-1a)"]
+      LB1["ELB (ALB)"] --> E1["EC2 c7i.large · Node"] --> S1[("S3 One Zone-IA<br/>directory bucket")]
+    end
+    subgraph VA["AZ regional (us-east-1b)"]
+      LB2["ELB (ALB)"] --> E2["EC2 c7i.large · Node"] --> S2[("S3 One Zone-IA<br/>regional bucket")]
+    end
   end
 ```
 
@@ -41,12 +47,14 @@ wait
 ```
 Usa el nombre real de tu ISP en lugar de `<ISP>` (por ejemplo `MYISP`), mantenlo igual en todas las corridas, y usa `movil` para celular o hotspot. Para ver la ruta: `sudo mtr -rwbzc 50 <IP>`.
 
-**Al terminar: `terraform destroy`.** Las instancias se cobran por hora. También puedes apagarlas entre sesiones (las IPs públicas cambian al encenderlas; corre `terraform apply -refresh-only` para actualizar los outputs).
+**Al terminar: `terraform destroy`.** Las instancias y los balanceadores se cobran por hora. También puedes apagarlas entre sesiones (las IPs públicas cambian al encenderlas; corre `terraform apply -refresh-only` para actualizar los outputs).
 
-## Pruebas adicionales (activadas por defecto)
-- **HTTPS:** las dos EC2 también sirven HTTPS en el puerto 443 con un certificado autofirmado (no necesitas dominio). Mide con el séptimo argumento: `./scripts/measure.sh bogota <IP> <ISP> <fibra|movil> 100 2 https`. Cada muestra es una conexión nueva, así que el TTFB incluye los handshakes de TCP y TLS.
-- **CloudFront contra Local Zone:** una distribución de CloudFront queda delante de la instancia de Virginia (`terraform output cloudfront_domain`). Mide las rutas cacheables: `./scripts/measure.sh cloudfront <DOMINIO> <ISP> <fibra|movil> 100 2 https "/cached /cached-payload"`. El CSV registra el punto de presencia (`pop`) y si fue acierto de caché. Se desactiva con `enable_cloudfront = false`.
-- **App en Bogotá, base de datos en Virginia:** `/upstream?n=10` en la instancia de Bogotá hace N llamadas seguidas a la de Virginia por la red privada. Ejecuta `./scripts/measure_upstream.sh <IP_BOGOTA> <ISP> <fibra|movil>`. El dashboard muestra cuántas consultas por petición hacen falta para que Virginia vuelva a ganar. Se desactiva con `enable_upstream_test = false`.
+## Pruebas
+- **Latencia base:** conexión TCP, TTFB y tiempo total, en HTTP y HTTPS (cada muestra abre una conexión nueva, así que el TTFB incluye los handshakes de TCP y TLS): `./scripts/measure.sh bogota <IP> <ISP> <fibra|movil> 100 2 [http|https]`.
+- **App completa (ELB + EC2 + S3):** leer y escribir objetos de 1 KB y 1 MB a través del balanceador: `./scripts/measure.sh bogota-alb <DNS_ALB> <ISP> <fibra|movil> 100 2 http "/ping /api/read?obj=small /api/read?obj=large /api/write?obj=large"`. El CSV también guarda el tiempo que la app gastó en S3 (`Server-Timing`).
+- **App en Bogotá, datos en Virginia:** `./scripts/measure_upstream.sh <IP_BOGOTA> <ISP> <fibra|movil>` hace N llamadas seguidas desde la instancia de Bogotá a la de Virginia por la red privada (`enable_upstream_test`).
+- **App en Bogotá, bucket en la región padre:** la instancia de Bogotá también puede leer y escribir en el bucket de Virginia (`&target=parent`). Ejecuta `EXTRA_QUERY=target=parent ./scripts/measure.sh bogota-parent-alb <DNS_ALB_BOGOTA> <ISP> <fibra|movil> 100 2 http "/api/read?obj=large /api/write?obj=large"`. Compáralo con `bogota-alb` para ver si el costo viene del bucket de la Local Zone o de la ubicación de la instancia.
+- Usa las etiquetas `bogota`, `virginia`, `bogota-alb`, `virginia-alb` y `bogota-parent-alb`. El dashboard las reconoce.
 
 ## Dashboard
 `dashboard.html` lee los CSV en el navegador (no sube nada). Sirve la carpeta (`python3 -m http.server`) y abre `/dashboard.html`, o arrastra tus CSV a la página. Muestra p50/p95/p99, jitter, pérdida, evolución en el tiempo y comparación por ISP. Para publicarlo, usa GitHub Pages o S3 con CloudFront.
@@ -60,6 +68,7 @@ Usa el nombre real de tu ISP en lugar de `<ISP>` (por ejemplo `MYISP`), mantenlo
 ## Limitaciones
 - Las Local Zones tienen un catálogo de servicios limitado y dependen de la región padre (IAM, consola).
 - El nombre de la Local Zone y su AZ padre pueden variar por cuenta; revisa la tuya (variable `virginia_az`).
+- La app llega a S3 por sus endpoints públicos (sin gateway endpoint de VPC), igual en las dos ubicaciones. Un gateway endpoint podría cambiar los números de S3.
 - El puerto 80 queda abierto a internet (las IPs móviles cambian) y solo protegido por el token sobre HTTP sin cifrar. Aceptable para una prueba corta; destruye todo al terminar.
 
 ## Aporta datos

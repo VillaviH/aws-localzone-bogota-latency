@@ -7,19 +7,25 @@ An open, reproducible latency test: **AWS Local Zone Bogotá** (`us-east-1-bog-1
 First measurements were taken in Ecuador (ISP-A fibre, ISP-B mobile 5G). Results differ a lot per ISP; see `data/raw/` and the dashboard.
 
 ## What it deploys
-- 1 VPC (`10.10.0.0/24`) with two `/26` subnets: one in the Local Zone, one in a regional AZ.
-- 2 EC2 `c7i.large` (the cheapest type offered in the Bogotá Local Zone; no t3), same Node app, same size.
-- App endpoints: `/ping` (tiny JSON) and `/payload` (1 MB). Both require the header `x-probe-token`, otherwise 403.
+The same small app is deployed twice, once in the Bogotá Local Zone and once in a regional AZ (Virginia), using only services AWS lists as available in the Bogotá Local Zone:
+- **ELB**: one Application Load Balancer per location.
+- **EC2**: one `c7i.large` per location (the cheapest type offered in the zone; no t3). Same Node app.
+- **S3 One Zone-IA**: a directory bucket inside the Local Zone, and a regional bucket written with the same storage class in Virginia.
+- VPC `10.10.0.0/24` with `/26` subnets. App endpoints: `/ping`, `/payload` (1 MB), `/api/read?obj=small|large` and `/api/write?obj=small|large` (S3), `/health` (no token). Everything else requires the header `x-probe-token`, otherwise 403.
 
 ## Architecture
 ```mermaid
 flowchart LR
-  C["Your client<br/>(laptop / phone)<br/>curl, ping, mtr"] --> I((Internet))
-  I --> B
-  I --> V
+  C["Your client<br/>(laptop / phone)"] --> I((Internet))
+  I --> LB1
+  I --> LB2
   subgraph R["AWS us-east-1 · VPC 10.10.0.0/24"]
-    B["Local Zone Bogotá<br/>us-east-1-bog-1a<br/>EC2 c7i.large · Node"]
-    V["Regional AZ (us-east-1b)<br/>EC2 c7i.large · Node"]
+    subgraph LZ["Local Zone Bogotá (us-east-1-bog-1a)"]
+      LB1["ELB (ALB)"] --> E1["EC2 c7i.large · Node"] --> S1[("S3 One Zone-IA<br/>directory bucket")]
+    end
+    subgraph VA["Regional AZ (us-east-1b)"]
+      LB2["ELB (ALB)"] --> E2["EC2 c7i.large · Node"] --> S2[("S3 One Zone-IA<br/>regional bucket")]
+    end
   end
 ```
 
@@ -46,12 +52,14 @@ wait
 ```
 Use your real ISP name instead of `<ISP>` (e.g. `MYISP`), keep it consistent, and use `movil` for mobile/hotspot. Run `sudo mtr -rwbzc 50 <IP>` to see the route.
 
-**When finished: `terraform destroy`.** Instances are billed per hour. You can also stop them between sessions (public IPs change on restart; run `terraform apply -refresh-only` to refresh the outputs).
+**When finished: `terraform destroy`.** Instances and load balancers are billed per hour. You can also stop them between sessions (public IPs change on restart; run `terraform apply -refresh-only` to refresh the outputs).
 
-## Extra tests (enabled by default)
-- **HTTPS:** both EC2 also serve HTTPS on 443 with a self-signed certificate (no domain needed). Measure with the 7th argument: `./scripts/measure.sh bogota <IP> <ISP> <fibra|movil> 100 2 https`. Each sample is a new connection, so TTFB includes TCP and TLS handshakes.
-- **CloudFront vs Local Zone:** a CloudFront distribution sits in front of the Virginia instance (`terraform output cloudfront_domain`). Measure cacheable paths: `./scripts/measure.sh cloudfront <DOMAIN> <ISP> <fibra|movil> 100 2 https "/cached /cached-payload"`. The CSV records the edge location (`pop`) and cache status. Disable with `enable_cloudfront = false`.
-- **App in Bogotá, database in Virginia:** `/upstream?n=10` on the Bogotá instance makes N sequential calls to the Virginia instance over the private network. Run `./scripts/measure_upstream.sh <BOGOTA_IP> <ISP> <fibra|movil>`. The dashboard shows how many queries per request it takes for Virginia to win again. Disable with `enable_upstream_test = false`.
+## Tests
+- **Base latency:** TCP connect, TTFB and total time, HTTP and HTTPS (each sample opens a new connection, so TTFB includes the TCP and TLS handshakes): `./scripts/measure.sh bogota <IP> <ISP> <fibra|movil> 100 2 [http|https]`.
+- **Full app (ELB + EC2 + S3):** read and write 1 KB and 1 MB objects through the load balancer: `./scripts/measure.sh bogota-alb <ALB_DNS> <ISP> <fibra|movil> 100 2 http "/ping /api/read?obj=small /api/read?obj=large /api/write?obj=large"`. The CSV also records the time the app spent in S3 (`Server-Timing`).
+- **App in Bogotá, data in Virginia:** `./scripts/measure_upstream.sh <BOGOTA_IP> <ISP> <fibra|movil>` makes N sequential calls from the Bogotá instance to the Virginia one over the private network (`enable_upstream_test`).
+- **App in Bogotá, bucket in the parent region:** the Bogotá instance can also read and write the Virginia bucket (`&target=parent`). Run `EXTRA_QUERY=target=parent ./scripts/measure.sh bogota-parent-alb <BOGOTA_ALB_DNS> <ISP> <fibra|movil> 100 2 http "/api/read?obj=large /api/write?obj=large"`. Compare it with `bogota-alb` to see whether the cost comes from the Local Zone bucket or from the instance location.
+- Use the labels `bogota`, `virginia`, `bogota-alb`, `virginia-alb`, `bogota-parent-alb`. The dashboard recognises them.
 
 ## Dashboard
 `dashboard.html` reads the CSVs in the browser (nothing is uploaded). Serve the folder (`python3 -m http.server`) and open `/dashboard.html`, or drag your CSVs onto the page. It shows p50/p95/p99, jitter, packet loss, time series and per-ISP comparison. To host it, use GitHub Pages or an S3 bucket behind CloudFront.
@@ -65,6 +73,7 @@ Use your real ISP name instead of `<ISP>` (e.g. `MYISP`), keep it consistent, an
 ## Limitations
 - Local Zones have a limited service catalog and depend on the parent region (IAM, console).
 - The Local Zone name and parent AZ can differ per account; check yours (`virginia_az` variable).
+- The app reaches S3 through its public endpoints (no VPC gateway endpoint), the same way in both locations. A gateway endpoint could change the S3 numbers.
 - Port 80 is open to the internet (mobile IPs change) and protected only by the token over plain HTTP. Fine for a short test; destroy afterwards.
 
 ## Contribute data

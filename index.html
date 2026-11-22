@@ -34,98 +34,104 @@
 <main>
 
 <h1>¿Vale la pena la Local Zone de AWS en Bogotá?</h1>
-<p class="sub">Una prueba abierta y reproducible de latencia: Local Zone Bogotá, Virginia (us-east-1) y CloudFront, medida desde tu propia red.</p>
+<p class="sub">Una prueba abierta y reproducible: la misma aplicación (balanceador, servidor y almacenamiento) en la Local Zone de Bogotá y en Virginia, medida desde tu propia red.</p>
 
 <a class="btn" href="dashboard.html">Ver dashboard con las mediciones</a>
 <a class="btn alt" href="https://github.com/VillaviH/aws-localzone-bogota-latency">Repositorio en GitHub</a>
 
 <div class="card warn" style="margin-top:20px">
   <strong>La pregunta</strong><br>
-  Si mis usuarios están en Ecuador (o en otro país de LATAM), ¿mejora la latencia al mover mis servicios a la Local Zone de Bogotá, frente a Virginia, donde ya están casi todos?
-  <br><span class="small">La distancia en el mapa no decide. Decide la ruta que toma el tráfico desde el operador de cada usuario, y por eso hay que medir desde donde están ellos. Datos preliminares: pocas muestras y pocas ventanas de tiempo. Opiniones personales, no de AWS.</span>
+  Si mis usuarios están en Ecuador (o en otro país de LATAM), ¿mejora la experiencia al mover una aplicación a la Local Zone de Bogotá, frente a Virginia, donde ya están casi todos?
+  <br><span class="small">La distancia en el mapa no decide. Decide la ruta que toma el tráfico desde el operador de cada usuario, y por eso hay que medir desde donde están ellos. Se usan solo servicios que AWS lista como disponibles hoy en la zona: EC2, ELB y S3 One Zone-IA. Datos preliminares: pocas muestras y pocas ventanas de tiempo. Opiniones personales, no de AWS.</span>
 </div>
 
 <h2>1. Arquitectura</h2>
 <div class="card">
-<svg viewBox="0 0 940 450" width="100%" role="img" aria-label="Diagrama de arquitectura">
+<svg viewBox="0 0 940 430" width="100%" role="img" aria-label="Diagrama de arquitectura">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9fb0c0"/></marker>
   </defs>
 
   <!-- cliente -->
-  <rect x="15" y="170" width="160" height="110" rx="10" fill="#0b1118" stroke="#2a3948"/>
-  <text x="95" y="200" text-anchor="middle" font-weight="700">Tu red</text>
-  <text x="95" y="222" text-anchor="middle" font-size="12">oficina, casa o móvil</text>
-  <text x="95" y="244" text-anchor="middle" font-size="12">curl · ping · mtr</text>
-  <text x="95" y="264" text-anchor="middle" font-size="12">measure.sh</text>
+  <rect x="10" y="150" width="150" height="120" rx="10" fill="#0b1118" stroke="#2a3948"/>
+  <text x="85" y="182" text-anchor="middle" font-weight="700">Tu red</text>
+  <text x="85" y="204" text-anchor="middle" font-size="12">oficina, casa o móvil</text>
+  <text x="85" y="226" text-anchor="middle" font-size="12">curl · ping · mtr</text>
+  <text x="85" y="246" text-anchor="middle" font-size="12">measure.sh</text>
 
   <!-- internet -->
-  <ellipse cx="305" cy="225" rx="62" ry="34" fill="#0b1118" stroke="#2a3948"/>
-  <text x="305" y="230" text-anchor="middle" font-size="14">Internet</text>
-  <line x1="175" y1="225" x2="241" y2="225" stroke="#9fb0c0" stroke-width="2" marker-end="url(#a)"/>
+  <ellipse cx="225" cy="210" rx="48" ry="30" fill="#0b1118" stroke="#2a3948"/>
+  <text x="225" y="215" text-anchor="middle" font-size="13">Internet</text>
+  <line x1="160" y1="210" x2="175" y2="210" stroke="#9fb0c0" stroke-width="2"/>
 
-  <!-- CloudFront -->
-  <rect x="490" y="15" width="370" height="95" rx="10" fill="#0b1118" stroke="#ff9900"/>
-  <text x="505" y="40" font-size="13" font-weight="700" style="fill:#ff9900">Amazon CloudFront</text>
-  <text x="505" y="62" font-size="12">Borde más cercano (desde Ecuador: Bogotá, BOG51)</text>
-  <text x="505" y="82" font-size="12">Valida el token · cachea /cached y /cached-payload</text>
-  <text x="505" y="100" font-size="12" style="fill:#9fb0c0">Solo va a Virginia si no tiene el contenido</text>
+  <!-- us-east-1 -->
+  <rect x="290" y="10" width="640" height="410" rx="12" fill="none" stroke="#ff9900" stroke-dasharray="6 4"/>
+  <text x="305" y="30" font-size="13" font-weight="700" style="fill:#ff9900">Región us-east-1 · VPC 10.10.0.0/24 · mismos tipos de servicio en cada carril</text>
 
-  <!-- VPC -->
-  <rect x="470" y="135" width="410" height="300" rx="12" fill="none" stroke="#ff9900" stroke-dasharray="6 4"/>
-  <text x="485" y="155" font-size="13" font-weight="700" style="fill:#ff9900">us-east-1 · VPC 10.10.0.0/24</text>
+  <!-- carril Bogotá -->
+  <rect x="305" y="45" width="610" height="165" rx="10" fill="#0b1118" stroke="#2f81f7"/>
+  <text x="320" y="68" font-size="13" font-weight="700" style="fill:#2f81f7">Local Zone Bogotá · us-east-1-bog-1a</text>
+  <rect x="320" y="85" width="150" height="105" rx="6" fill="#17212c" stroke="#2f81f7"/>
+  <text x="395" y="112" text-anchor="middle" font-size="13" font-weight="700">ELB (ALB)</text>
+  <text x="395" y="134" text-anchor="middle" font-size="11">balanceador</text>
+  <text x="395" y="150" text-anchor="middle" font-size="11">HTTP 80</text>
+  <rect x="520" y="85" width="180" height="105" rx="6" fill="#17212c" stroke="#2f81f7"/>
+  <text x="610" y="112" text-anchor="middle" font-size="13" font-weight="700">EC2 c7i.large</text>
+  <text x="610" y="134" text-anchor="middle" font-size="11">app Node · /api/read</text>
+  <text x="610" y="150" text-anchor="middle" font-size="11">/api/write · /health</text>
+  <rect x="750" y="85" width="150" height="105" rx="6" fill="#17212c" stroke="#2f81f7"/>
+  <text x="825" y="112" text-anchor="middle" font-size="13" font-weight="700">S3 One Zone-IA</text>
+  <text x="825" y="134" text-anchor="middle" font-size="11">bucket de directorio</text>
+  <text x="825" y="150" text-anchor="middle" font-size="11">dentro de la Local Zone</text>
+  <line x1="470" y1="138" x2="518" y2="138" stroke="#2f81f7" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="700" y1="138" x2="748" y2="138" stroke="#2f81f7" stroke-width="2" marker-end="url(#a)"/>
 
-  <rect x="490" y="168" width="370" height="100" rx="10" fill="#0b1118" stroke="#2f81f7"/>
-  <text x="505" y="190" font-size="13" font-weight="700" style="fill:#2f81f7">Local Zone Bogotá · us-east-1-bog-1a</text>
-  <rect x="505" y="202" width="340" height="52" rx="6" fill="#17212c" stroke="#2f81f7"/>
-  <text x="520" y="224" font-size="13" font-weight="700">EC2 c7i.large · Node · HTTP 80 y HTTPS 443</text>
-  <text x="520" y="243" font-size="12">/ping · /payload · /upstream?n=N</text>
+  <!-- carril Virginia -->
+  <rect x="305" y="235" width="610" height="165" rx="10" fill="#0b1118" stroke="#a371f7"/>
+  <text x="320" y="258" font-size="13" font-weight="700" style="fill:#a371f7">AZ regional · us-east-1b (Virginia)</text>
+  <rect x="320" y="275" width="150" height="105" rx="6" fill="#17212c" stroke="#a371f7"/>
+  <text x="395" y="302" text-anchor="middle" font-size="13" font-weight="700">ELB (ALB)</text>
+  <text x="395" y="324" text-anchor="middle" font-size="11">balanceador</text>
+  <text x="395" y="340" text-anchor="middle" font-size="11">HTTP 80</text>
+  <rect x="520" y="275" width="180" height="105" rx="6" fill="#17212c" stroke="#a371f7"/>
+  <text x="610" y="302" text-anchor="middle" font-size="13" font-weight="700">EC2 c7i.large</text>
+  <text x="610" y="324" text-anchor="middle" font-size="11">misma app Node</text>
+  <text x="610" y="340" text-anchor="middle" font-size="11">mismo tipo de instancia</text>
+  <rect x="750" y="275" width="150" height="105" rx="6" fill="#17212c" stroke="#a371f7"/>
+  <text x="825" y="302" text-anchor="middle" font-size="13" font-weight="700">S3 One Zone-IA</text>
+  <text x="825" y="324" text-anchor="middle" font-size="11">bucket regional</text>
+  <text x="825" y="340" text-anchor="middle" font-size="11">misma clase de almacenamiento</text>
+  <line x1="470" y1="328" x2="518" y2="328" stroke="#a371f7" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="700" y1="328" x2="748" y2="328" stroke="#a371f7" stroke-width="2" marker-end="url(#a)"/>
 
-  <rect x="490" y="320" width="370" height="100" rx="10" fill="#0b1118" stroke="#a371f7"/>
-  <text x="505" y="342" font-size="13" font-weight="700" style="fill:#a371f7">AZ regional · us-east-1b (Virginia)</text>
-  <rect x="505" y="354" width="340" height="52" rx="6" fill="#17212c" stroke="#a371f7"/>
-  <text x="520" y="376" font-size="13" font-weight="700">EC2 c7i.large · Node · HTTP 80 y HTTPS 443</text>
-  <text x="520" y="395" font-size="12">Misma app, mismo tipo de instancia</text>
-
-  <!-- flechas internet -->
-  <line x1="355" y1="205" x2="488" y2="75" stroke="#ff9900" stroke-width="2.5" marker-end="url(#a)"/>
-  <line x1="367" y1="222" x2="488" y2="222" stroke="#2f81f7" stroke-width="2.5" marker-end="url(#a)"/>
-  <line x1="355" y1="245" x2="488" y2="372" stroke="#a371f7" stroke-width="2.5" marker-end="url(#a)"/>
-
-  <!-- CloudFront -> origen Virginia -->
-  <polyline points="860,62 910,62 910,380 848,380" fill="none" stroke="#ff9900" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a)"/>
-  <text x="918" y="215" font-size="11" style="fill:#ff9900" transform="rotate(90 918 215)">origen (solo si no está en caché)</text>
-
-  <!-- upstream Bogotá -> Virginia -->
-  <line x1="675" y1="256" x2="675" y2="352" stroke="#3fb950" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a)"/>
-  <text x="685" y="296" font-size="11" style="fill:#3fb950">app en Bogotá, base de datos</text>
-  <text x="685" y="311" font-size="11" style="fill:#3fb950">en Virginia (red privada)</text>
+  <!-- internet a ALB -->
+  <line x1="268" y1="195" x2="318" y2="140" stroke="#2f81f7" stroke-width="2.5" marker-end="url(#a)"/>
+  <line x1="268" y1="225" x2="318" y2="320" stroke="#a371f7" stroke-width="2.5" marker-end="url(#a)"/>
 </svg>
-<p class="small">Una sola VPC con dos subredes <code>/26</code>. Las instancias exigen el header <code>x-probe-token</code> y responden 403 sin él. HTTPS usa un certificado autofirmado, así que no hace falta dominio.</p>
+<p class="small">Una VPC con subredes <code>/26</code>. Las instancias también se miden de forma directa (sin balanceador) para ver cuánto añade el ELB. Todo exige el header <code>x-probe-token</code> y responde 403 sin él. HTTPS en las EC2 usa un certificado autofirmado.</p>
 </div>
 
 <h2>2. Qué se mide</h2>
 <div class="grid">
-  <div class="card"><strong>Latencia base</strong><br>HTTP a Bogotá y a Virginia: conexión TCP, primer byte (TTFB) y tiempo total, con un payload pequeño y uno de 1 MB. También <code>ping</code> y <code>mtr</code> para ver la ruta.</div>
-  <div class="card"><strong>HTTPS</strong><br>Cada muestra abre una conexión nueva, así que el TTFB incluye los handshakes de TCP y TLS. Es lo más parecido a lo que siente un usuario real.</div>
-  <div class="card"><strong>CloudFront contra Local Zone</strong><br>¿Un borde de CloudFront en Bogotá ya da casi la misma latencia para contenido cacheable, sin migrar nada? El CSV registra qué punto de presencia atendió y si fue acierto de caché.</div>
-  <div class="card"><strong>App en Bogotá, base de datos en Virginia</strong><br>No todos los servicios están en la Local Zone. Mide cuánto cuesta cada consulta a la región padre y cuántas consultas por petición borran la ventaja.</div>
+  <div class="card"><strong>Latencia base</strong><br>Conexión TCP, primer byte (TTFB) y tiempo total hacia cada EC2, con un payload pequeño y uno de 1 MB. También <code>ping</code> y <code>mtr</code> para ver la ruta.</div>
+  <div class="card"><strong>HTTPS</strong><br>Cada muestra abre una conexión nueva, así que el TTFB incluye los handshakes de TCP y TLS: lo más parecido a lo que siente un usuario real.</div>
+  <div class="card"><strong>Aplicación completa: ELB, EC2 y S3</strong><br>Leer y escribir objetos de 1 KB y 1 MB en S3 a través del balanceador. Se registra el tiempo total que ve el cliente y el tiempo que la app gasta en S3 (<code>Server-Timing</code>).</div>
+  <div class="card"><strong>Costo de cada capa</strong><br>Comparar directo a la EC2 contra pasar por el ELB, y el tiempo de S3 contra el total, muestra qué parte de la latencia viene de la red del usuario y cuál del servicio.</div>
 </div>
 <p class="small">Estadísticas: p50, p95 y p99, jitter y pérdida. Mismo cliente, misma app y mismo tipo de instancia (<code>c7i.large</code>, el más barato disponible en la zona), con las dos ubicaciones medidas en paralelo.</p>
 
 <h2>3. Resultados preliminares</h2>
 <div class="card">
-  <p class="small" id="note">Calculado en tu navegador desde <code>data/raw/*.csv</code>. Si abres este archivo sin servidor (<code>file://</code>), los datos no cargan: usa <code>python3 -m http.server</code> o la versión publicada.</p>
+  <p class="small">Calculado en tu navegador desde <code>data/raw/*.csv</code>. Si abres este archivo sin servidor (<code>file://</code>), los datos no cargan: usa <code>python3 -m http.server</code> o la versión publicada.</p>
   <table id="res"><tr><td>Cargando…</td></tr></table>
-  <p class="small">TTFB en milisegundos (mediana, p50). Menos es mejor. ISP-A e ISP-B son dos conexiones distintas en Ecuador (fibra y móvil 5G).</p>
+  <p class="small">TTFB en milisegundos (mediana, p50). Menos es mejor. ISP-A e ISP-B son dos conexiones distintas en Ecuador (fibra y móvil 5G). La columna "S3 en servidor" es el tiempo que la app tarda en hablar con S3 (Bogotá / Virginia).</p>
 </div>
 
 <div class="card warn">
   <strong>Cómo leerlo</strong>
   <ul>
     <li>El resultado depende del operador: con una conexión Bogotá puede ganar por mucho y con otra puede perder.</li>
-    <li>CloudFront ayuda con contenido cacheable. Para respuestas dinámicas, el borde igual tiene que ir a Virginia.</li>
-    <li>Si la aplicación en Bogotá consulta una base de datos en Virginia, cada consulta paga el viaje a la región padre.</li>
+    <li>Un servicio puede ser más lento dentro de la zona que en la región, aunque la red del usuario llegue antes. Por eso se mide el tiempo de S3 por separado.</li>
     <li>La Local Zone no tiene todos los servicios de AWS. Revisa el <a href="https://aws.amazon.com/es/blogs/infrastructure-sustainability/now-open-aws-local-zones-in-bogota-colombia/">anuncio oficial</a> antes de pensar en migrar.</li>
   </ul>
 </div>
@@ -134,10 +140,10 @@
 <div class="card">
 <ol>
   <li>Clona el repositorio y activa la Local Zone de Bogotá en tu cuenta de AWS.</li>
-  <li><code>terraform apply</code> en <code>infra/terraform</code>. Crea 2 EC2 y una distribución de CloudFront.</li>
+  <li><code>terraform apply</code> en <code>infra/terraform</code>. Crea 2 EC2, 2 balanceadores y 2 buckets de S3 (uno en la Local Zone y otro en Virginia).</li>
   <li>Corre <code>scripts/measure.sh</code> desde tu oficina, tu casa o tu celular.</li>
   <li>Abre el <a href="dashboard.html">dashboard</a> y mira tus gráficas. Todo se calcula en tu navegador.</li>
-  <li><code>terraform destroy</code> al terminar: las instancias se cobran por hora.</li>
+  <li><code>terraform destroy</code> al terminar: los balanceadores y las instancias se cobran por hora.</li>
   <li>Envía tu CSV por pull request a <code>data/community/</code> para armar un mapa real de latencia de Ecuador y LATAM.</li>
 </ol>
 </div>
@@ -145,30 +151,41 @@
 </main>
 
 <script>
-function parse(t){const L=t.trim().split(/\r?\n/),h=L.shift().split(',');return L.map(l=>{const c=l.split(','),o={};h.forEach((k,i)=>o[k]=c[i]);o.proto=o.proto||'http';o.ttfb=parseFloat(o.ttfb_s)*1000;o.ok=o.http_code==='200'&&!isNaN(o.ttfb);return o;});}
+function parse(t){const L=t.trim().split(/\r?\n/),h=L.shift().split(',');return L.map(l=>{const c=l.split(','),o={};h.forEach((k,i)=>o[k]=c[i]);o.proto=o.proto||'http';o.ttfb=parseFloat(o.ttfb_s)*1000;o.s3=parseFloat(o.s3_ms);o.ok=o.http_code==='200'&&!isNaN(o.ttfb);return o;});}
 function pct(v,p){if(!v.length)return NaN;const s=[...v].sort((a,b)=>a-b),i=(s.length-1)*p/100,lo=Math.floor(i),hi=Math.ceil(i);return s[lo]+(s[hi]-s[lo])*(i-lo);}
 const f=x=>isNaN(x)?'-':Math.round(x);
 async function get(n){try{const r=await fetch('data/raw/curl_'+n+'.csv');return r.ok?parse(await r.text()):[];}catch(e){return [];}}
 (async()=>{
-  const [bog,vir,cf]=await Promise.all([get('bogota'),get('virginia'),get('cloudfront')]);
+  const D={};
+  for(const l of ['bogota','virginia','bogota-alb','virginia-alb','bogota-parent-alb'])D[l]=await get(l);
   let up=[];try{const r=await fetch('data/raw/curl_upstream.csv');if(r.ok)up=parse(await r.text());}catch(e){}
   const t=document.getElementById('res');
-  if(!bog.length||!vir.length){t.innerHTML='<tr><td>No se pudieron cargar los datos (¿abriste el archivo sin servidor?).</td></tr>';return;}
-  const med=(rows,isp,net,proto,path)=>pct(rows.filter(r=>r.ok&&r.isp===isp&&r.net===net&&r.proto===proto&&r.path===path).map(r=>r.ttfb),50);
-  const groups=[...new Set(bog.map(r=>r.isp+'|'+r.net))];
-  let html='<tr><th>Conexión</th><th>Prueba</th><th class="n">Bogotá</th><th class="n">Virginia</th><th class="n">CloudFront</th><th class="n">Diferencia Bogotá vs Virginia</th></tr>';
+  if(!D.bogota.length||!D.virginia.length){t.innerHTML='<tr><td>No se pudieron cargar los datos (¿abriste el archivo sin servidor?).</td></tr>';return;}
+  const sel=(rows,isp,net,proto,path)=>rows.filter(r=>r.ok&&r.isp===isp&&r.net===net&&r.proto===proto&&r.path===path);
+  const tests=[
+    ['','http','/ping','HTTP /ping, directo a la EC2'],
+    ['','https','/ping','HTTPS /ping, directo a la EC2'],
+    ['-alb','http','/ping','/ping vía ELB'],
+    ['-alb','http','/api/read?obj=small','Leer 1 KB de S3 vía ELB'],
+    ['-alb','http','/api/read?obj=large','Leer 1 MB de S3 vía ELB'],
+    ['-alb','http','/api/write?obj=large','Escribir 1 MB en S3 vía ELB']
+  ];
+  const groups=[...new Set(D.bogota.map(r=>r.isp+'|'+r.net))];
+  let html='<tr><th>Conexión</th><th>Prueba</th><th class="n">Bogotá</th><th class="n">Virginia</th><th class="n">Diferencia</th><th class="n">S3 en servidor</th><th class="n">Bogotá con bucket regional</th></tr>';
   for(const g of groups){
     const [isp,net]=g.split('|');
-    for(const [proto,path,cfp,label] of [['http','/ping',null,'HTTP /ping'],['https','/ping','/cached','HTTPS /ping'],['https','/payload','/cached-payload','HTTPS 1 MB']]){
-      const b=med(bog,isp,net,proto,path),v=med(vir,isp,net,proto,path);
-      if(isNaN(b)||isNaN(v))continue;
-      const c=cfp?med(cf,isp,net,'https',cfp):NaN;
-      const d=100*(v-b)/v;
-      html+=`<tr><td>${isp} · ${net}</td><td>${label}</td><td class="n">${f(b)}</td><td class="n">${f(v)}</td><td class="n">${f(c)}</td><td class="n ${d>=0?'good':'bad'}">${d>=0?'-':'+'}${Math.abs(d).toFixed(0)} %${d>=0?'':' (Bogotá peor)'}</td></tr>`;
+    for(const [suf,proto,path,label] of tests){
+      const b=sel(D['bogota'+suf]||[],isp,net,proto,path),v=sel(D['virginia'+suf]||[],isp,net,proto,path);
+      const bm=pct(b.map(r=>r.ttfb),50),vm=pct(v.map(r=>r.ttfb),50);
+      if(isNaN(bm)||isNaN(vm))continue;
+      const d=100*(vm-bm)/vm;
+      const bs=pct(b.map(r=>r.s3).filter(x=>!isNaN(x)),50),vs=pct(v.map(r=>r.s3).filter(x=>!isNaN(x)),50);
+      const pp=sel(D['bogota-parent-alb']||[],isp,net,proto,path),pm=pct(pp.map(r=>r.ttfb),50),ps=pct(pp.map(r=>r.s3).filter(x=>!isNaN(x)),50);
+      html+=`<tr><td>${isp} · ${net}</td><td>${label}</td><td class="n">${f(bm)}</td><td class="n">${f(vm)}</td><td class="n ${d>=0?'good':'bad'}">${d>=0?'-':'+'}${Math.abs(d).toFixed(0)} %${d>=0?'':' (Bogotá peor)'}</td><td class="n">${isNaN(bs)?'-':f(bs)+' / '+f(vs)}</td><td class="n">${isNaN(pm)?'-':f(pm)+(isNaN(ps)?'':' ('+f(ps)+' en S3)')}</td></tr>`;
     }
   }
   const per=pct(up.map(r=>parseFloat(r.per_query_ms)).filter(x=>!isNaN(x)),50);
-  if(!isNaN(per))html+=`<tr><td colspan="6">Cada consulta de la app en Bogotá a Virginia (red privada): <strong>${per.toFixed(0)} ms</strong> (mediana de ${up.length} muestras).</td></tr>`;
+  if(!isNaN(per))html+=`<tr><td colspan="7">Cada consulta de la app en Bogotá a Virginia (red privada): <strong>${per.toFixed(0)} ms</strong> (mediana de ${up.length} muestras).</td></tr>`;
   t.innerHTML=html;
 })();
 </script>
