@@ -4,9 +4,12 @@
 
 An open, reproducible latency test: **AWS Local Zone Bogotá** (`us-east-1-bog-1a`) vs **us-east-1 (Virginia)**, measured from *your* office, home or mobile network. Latency depends heavily on the ISP and the route, so the only way to know is to measure from where your users are.
 
-![Race: Bogotá Local Zone vs Virginia, measured from Ecuador](docs/demo.gif)
+<p align="center">
+<img src="docs/demo.gif" width="49%" alt="Race with ISP-A fibre: Bogotá is faster">
+<img src="docs/demo-movil.gif" width="49%" alt="Race with ISP-B mobile 5G: Bogotá is slower">
+</p>
 
-*Same request, slow motion, using the measured medians. Try it live: `demo.html`.*
+*The same request (write 1 MB to S3) in slow motion, using the measured medians. Left: ISP-A fibre. Right: ISP-B mobile 5G. Try it live: `demo.html`.*
 
 First measurements were taken in Ecuador (ISP-A fibre, ISP-B mobile 5G). Results differ a lot per ISP; see `data/raw/` and the dashboard.
 
@@ -66,24 +69,37 @@ Use your real ISP name instead of `<ISP>` (e.g. `MYISP`), keep it consistent, an
 - Use the labels `bogota`, `virginia`, `bogota-alb`, `virginia-alb`, `bogota-parent-alb`. The dashboard recognises them.
 
 ## Preliminary results
-Median total time of the request through the load balancer, in milliseconds (Bogotá / Virginia). Measured from Quito, Ecuador, 100 samples per series and window. ISP-A (fibre) was measured in two windows (Sunday evening and Monday morning, same result); ISP-B (mobile 5G) in one window on Monday morning, plus a `/ping` check on a different day with the same result.
+Median total time of the request through the load balancer, in milliseconds (Bogotá / Virginia), measured from Quito, Ecuador. ISP-A (fibre): three windows (Sunday afternoon, Monday 9:27 and Monday 12:15), 300 to 400 samples per series. ISP-B (mobile 5G): two windows (Monday 10:37 and Monday 12:55), 200 samples per series, plus a `/ping` check on Saturday with the same result.
+
+![Bogotá vs Virginia, both operators](docs/img/resumen-bogota-vs-virginia.png)
 
 | Test | ISP-A fibre | ISP-B mobile 5G |
 |---|---|---|
-| `/ping` | 46 / 225 | 327 / 261 |
-| Read 1 MB from S3 | 111 / 261 | 385 / 299 |
-| Write 1 MB to S3 | 252 / 299 | 505 / 329 |
-| Write 1 MB, app in Bogotá + bucket in Virginia | 582 | 874 |
-| Time spent in S3 inside the server, write 1 MB | 188 / 54 | 186 / 63 |
+| `/ping` | 47 / 224 | 348 / 280 |
+| Read 1 MB from S3 | 110 / 261 | 415 / 324 |
+| Write 1 MB to S3 | 251 / 302 | 534 / 354 |
+| Write 1 MB, app in Bogotá + bucket in Virginia | 573 | 870 |
+| Time spent in S3 inside the server, write 1 MB | 187 / 58 | 186 / 66 |
 
-- With the app and its data together in Bogotá and a well-routed operator (ISP-A), Bogotá is faster: about 80 % less network time, 57 % less to read 1 MB and 16 % less to write 1 MB.
-- With ISP-A the network reaches Bogotá first (about 80 % less on `/ping`). With ISP-B Bogotá is slower in every test (25 % to 54 %).
-- S3 inside the Local Zone is slower than regional S3 (writes: about 187 ms against 54 to 63 ms), and it is the same with both operators, so it comes from the service and not from the user's network.
-- Moving the app but leaving the data in the parent region makes writes about twice as slow as keeping everything in Virginia, with occasional multi-second stalls inside the S3 call (5 of 300 requests in the ISP-B window).
+The result repeats in every window:
+
+| Window | `/ping` | Read 1 MB | Write 1 MB |
+|---|---|---|---|
+| ISP-A, Sunday afternoon | 47 / 233 | 111 / 262 | 255 / 302 |
+| ISP-A, Monday 9:27 | 46 / 218 | 111 / 254 | 251 / 291 |
+| ISP-A, Monday 12:15 | 47 / 222 | 108 / 260 | 250 / 305 |
+| ISP-B, Monday 10:37 | 327 / 261 | 385 / 299 | 505 / 329 |
+| ISP-B, Monday 12:55 | 401 / 345 | 457 / 384 | 568 / 406 |
+
+- With the app and its data together in Bogotá and a well-routed operator (ISP-A), Bogotá is faster: 79 % less network time, 58 % less to read 1 MB and 17 % less to write 1 MB. In the worst case (p95) writes are slower in Bogotá (393 ms against 342 ms).
+- With ISP-B, Bogotá is slower in every test (24 % to 51 % in the combined medians, 16 % to 54 % per window). My hypothesis is that it is that operator's route and not the zone, but I have not verified it with `mtr`.
+- S3 inside the Local Zone is slower than regional S3 (writes: about 187 ms against 58 to 66 ms). It is the same with both operators, so it comes from the service and not from the user's network.
+- Moving the app but leaving the data in the parent region makes writes 1.9 times (ISP-A) and 2.5 times (ISP-B) slower than keeping everything in Virginia. With ISP-B, 6 of 600 requests of that series took more than 1.5 s (the longest, 23 s), almost all of it inside the S3 call.
+- Each query from the Bogotá instance to the Virginia instance over the private network cost about 59 ms (71 ms in the first test).
 - Preliminary: one city, two operators, few windows. Do not generalize; measure from your own network.
 
 ## Dashboard
-`dashboard.html` reads the CSVs in the browser (nothing is uploaded). Serve the folder (`python3 -m http.server`) and open `/dashboard.html`, or drag your CSVs onto the page. It shows p50/p95/p99, jitter, packet loss, time series and per-ISP comparison. To host it, use GitHub Pages or an S3 bucket behind CloudFront.
+`dashboard.html` reads the CSVs in the browser (nothing is uploaded). Serve the folder (`python3 -m http.server`) and open `/dashboard.html`, or drag your CSVs onto the page. It shows p50/p95/p99, jitter, packet loss, time series and per-ISP comparison. To host it, use GitHub Pages or an S3 bucket behind CloudFront. `charts.html` renders the share cards of the images above (`?card=1|2|3&clean=1`).
 
 ## Good measurement practice
 - Same client, same app, same instance type, same payload size; run both locations **in parallel**.

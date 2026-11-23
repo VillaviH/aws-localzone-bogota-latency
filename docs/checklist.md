@@ -2,11 +2,11 @@
 - [x] Opt-in de la Local Zone
 - [x] Terraform: VPC, subredes, EC2, ELB y S3 (Bogotá y Virginia)
 - [x] App con /ping, /payload, /api/read y /api/write (S3), /upstream
-- [x] Medir ISP-A fibra (2 ventanas) e ISP-B móvil (1 ventana)
+- [x] Medir ISP-A fibra (3 ventanas) e ISP-B móvil (2 ventanas)
 - [x] Calcular p50/p95/p99, jitter, pérdida (dashboard)
-- [x] Dashboard, demo animada y GIF
+- [x] Dashboard, demo animada, GIF y tarjetas para compartir
 - [x] Publicar repo
-- [ ] Más ventanas (mediodía, noche) y más operadores / ciudades
+- [ ] Más ventanas (noche, fin de semana) y más operadores / ciudades
 - [ ] mtr desde ISP-B para explicar la ruta
 - [ ] Publicar artículo y post
 - [ ] Destruir recursos (terraform destroy)

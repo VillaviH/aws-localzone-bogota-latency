@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tarjetas para compartir: Local Zone de Bogotá vs Virginia</title>
+<style>
+  html, body { margin:0; background:#0b1118; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  svg { display:block; max-width:100%; height:auto; }
+  nav { color:#9fb0c0; font-size:13px; padding:8px 14px; }
+  nav a { color:#58a6ff; margin-right:12px; }
+  body.clean nav { display:none; }
+</style>
+</head>
+<body>
+<nav>Tarjetas (1200×675): <a href="?card=1">1 · Resumen</a><a href="?card=2">2 · Datos juntos</a><a href="?card=3">3 · Tiempo en S3</a> · Para exportar: <code>?card=1&amp;clean=1</code></nav>
+<div id="root"></div>
+<script>
+const Q = new URLSearchParams(location.search);
+if (Q.has('clean')) document.body.classList.add('clean');
+const CARD = Q.get('card') || '1';
+const NS = 'http://www.w3.org/2000/svg';
+const COL = { bog:'#2f81f7', vir:'#a371f7', par:'#3fb950', txt:'#e6edf3', mut:'#9fb0c0', bg:'#0b1118', card:'#131c26', line:'#2a3948', good:'#3fb950', bad:'#f85149' };
+const OPS = { 'ISP-A|fibra': 'Operador A · fibra', 'ISP-B|movil': 'Operador B · móvil 5G' };
+const PATHS = { ping:'/ping', read1mb:'/api/read?obj=large', write:'/api/write?obj=large' };
+
+function parse(t) { const L = t.trim().split(/\r?\n/), h = L.shift().split(','); return L.map(l => { const c = l.split(','), o = {}; h.forEach((k, i) => o[k] = c[i]); o.proto = o.proto || 'http'; o.ttfb = parseFloat(o.ttfb_s) * 1000; o.s3 = parseFloat(o.s3_ms); o.ok = o.http_code === '200' && !isNaN(o.ttfb); o.group = o.isp + '|' + o.net; return o; }); }
+function pct(v, p) { if (!v.length) return NaN; const s = [...v].sort((a, b) => a - b), i = (s.length - 1) * p / 100, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); }
+const fmt = x => String(Math.round(x));
+const dec = x => x.toFixed(1).replace('.', ',');
+const D = {};
+function stat(group, label, path, field = 'ttfb') {
+  const v = (D[label] || []).filter(r => r.ok && r.proto === 'http' && r.path === path && (group === 'all' || r.group === group)).map(r => r[field]).filter(x => !isNaN(x));
+  return { p50: pct(v, 50), n: v.length };
+}
+function el(tag, attrs, parent, text) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; }
+function T(svg, x, y, text, size, fill, weight, anchor) { return el('text', { x, y, 'font-size': size, fill: fill || COL.txt, 'font-weight': weight || 400, 'text-anchor': anchor || 'start' }, svg, text); }
+function base(title, sub) {
+  const root = document.getElementById('root'); root.innerHTML = '';
+  const svg = el('svg', { viewBox: '0 0 1200 675', width: 1200, height: 675 }, root);
+  el('rect', { x: 0, y: 0, width: 1200, height: 675, fill: COL.bg }, svg);
+  T(svg, 40, 62, title, 36, COL.txt, 800);
+  T(svg, 40, 96, sub, 19, COL.mut);
+  T(svg, 40, 650, 'github.com/VillaviH/aws-localzone-bogota-latency', 18, COL.mut);
+  T(svg, 1160, 650, 'Medido desde Quito, Ecuador · datos preliminares', 18, COL.mut, 400, 'end');
+  return svg;
+}
+function panel(svg, x, y, w, h, title, note) {
+  el('rect', { x, y, width: w, height: h, rx: 14, fill: COL.card, stroke: COL.line, 'stroke-width': 1.5 }, svg);
+  T(svg, x + 24, y + 40, title, 26, COL.txt, 800);
+  if (note) T(svg, x + w - 24, y + 40, note, 16, COL.mut, 400, 'end');
+}
+function bar(svg, x, y, w, h, color) { el('rect', { x, y, width: Math.max(2, w), height: h, rx: 5, fill: color }, svg); }
+function legend(svg, items, y) {
+  let x = 40;
+  items.forEach(([c, t]) => { el('rect', { x, y: y - 14, width: 18, height: 18, rx: 4, fill: c }, svg); T(svg, x + 26, y, t, 18, COL.txt); x += 60 + t.length * 9.5; });
+}
+
+function card1() {
+  const svg = base('Local Zone de Bogotá vs Virginia, medido desde Ecuador', 'La misma aplicación (ELB + EC2 + S3) en cada ubicación · mediana del tiempo total de la petición, en ms · menos es mejor');
+  const groups = Object.keys(OPS);
+  const tests = [['ping', 'Red (/ping)'], ['read1mb', 'Leer 1 MB de S3'], ['write', 'Escribir 1 MB en S3']];
+  const data = groups.map(g => tests.map(([k]) => ({ b: stat(g, 'bogota-alb', PATHS[k]), v: stat(g, 'virginia-alb', PATHS[k]) })));
+  const max = Math.max(...data.flat().flatMap(d => [d.b.p50, d.v.p50]));
+  const scale = 330 / max;
+  groups.forEach((g, gi) => {
+    const x = 40 + gi * 580, y = 118, w = 540, h = 452;
+    const nmin = Math.min(...data[gi].flatMap(d => [d.b.n, d.v.n]));
+    panel(svg, x, y, w, h, OPS[g], `${nmin}+ muestras por barra`);
+    tests.forEach(([k, label], ti) => {
+      const d = data[gi][ti], gy = y + 78 + ti * 124;
+      T(svg, x + 24, gy + 14, label, 20, COL.txt, 700);
+      const faster = d.b.p50 < d.v.p50, rel = Math.abs(d.v.p50 - d.b.p50) / d.v.p50 * 100;
+      T(svg, x + w - 24, gy + 15, `${fmt(rel)} % ${faster ? 'menos' : 'más'} en Bogotá`, 20, faster ? COL.good : COL.bad, 800, 'end');
+      [['b', COL.bog], ['v', COL.vir]].forEach(([key, color], bi) => {
+        const val = d[key].p50, by = gy + 28 + bi * 38, bw = val * scale;
+        bar(svg, x + 24, by, bw, 30, color);
+        T(svg, x + 24 + bw + 10, by + 22, `${fmt(val)} ms`, 20, COL.txt, 800);
+      });
+    });
+  });
+  legend(svg, [[COL.bog, 'Bogotá (Local Zone)'], [COL.vir, 'Virginia (us-east-1)']], 612);
+}
+
+function card2() {
+  const svg = base('Si mueves la app, mueve también los datos', 'Escribir 1 MB en S3 a través del balanceador · mediana, en ms · menos es mejor');
+  const groups = Object.keys(OPS);
+  const rows = [['Todo en Virginia', 'virginia-alb', COL.vir], ['Todo en Bogotá', 'bogota-alb', COL.bog], ['App en Bogotá + bucket en Virginia', 'bogota-parent-alb', COL.par]];
+  const data = groups.map(g => rows.map(([, l]) => stat(g, l, PATHS.write)));
+  const max = Math.max(...data.flat().map(d => d.p50)), scale = 330 / max;
+  groups.forEach((g, gi) => {
+    const x = 40 + gi * 580, y = 118, w = 540, h = 452;
+    panel(svg, x, y, w, h, OPS[g], `${Math.min(...data[gi].map(d => d.n))}+ muestras por barra`);
+    const vir = data[gi][0].p50;
+    rows.forEach(([label, , color], ri) => {
+      const val = data[gi][ri].p50, gy = y + 78 + ri * 124, bw = val * scale;
+      T(svg, x + 24, gy + 14, label, 20, COL.txt, 700);
+      bar(svg, x + 24, gy + 28, bw, 34, color);
+      T(svg, x + 24 + bw + 10, gy + 52, `${fmt(val)} ms`, 22, COL.txt, 800);
+      if (ri === 2) T(svg, x + 24, gy + 92, `×${dec(val / vir)} el tiempo de dejar todo en Virginia`, 19, COL.bad, 800);
+      if (ri === 1) { const rel = (vir - val) / vir * 100; T(svg, x + 24, gy + 92, rel >= 0 ? `${fmt(rel)} % menos que Virginia` : `${fmt(-rel)} % más que Virginia`, 19, rel >= 0 ? COL.good : COL.bad, 800); }
+    });
+  });
+  legend(svg, [[COL.vir, 'Virginia'], [COL.bog, 'Bogotá (app y datos)'], [COL.par, 'App en Bogotá, datos en Virginia']], 612);
+}
+
+function card3() {
+  const svg = base('El tiempo que la app pasa hablando con S3', 'Medido dentro del servidor, así que no depende del operador · mediana, en ms · menos es mejor');
+  const tests = [['read1mb', 'Leer 1 MB'], ['write', 'Escribir 1 MB']];
+  const data = tests.map(([k]) => ({ b: stat('all', 'bogota-alb', PATHS[k], 's3'), v: stat('all', 'virginia-alb', PATHS[k], 's3') }));
+  const max = Math.max(...data.flatMap(d => [d.b.p50, d.v.p50])), scale = 400 / max;
+  const x = 40, y = 118, w = 1120, h = 452;
+  panel(svg, x, y, w, h, 'Tiempo en S3 dentro del servidor (ambos operadores juntos)', `${Math.min(...data.flatMap(d => [d.b.n, d.v.n]))} mediciones por barra`);
+  tests.forEach(([k, label], ti) => {
+    const d = data[ti], gy = y + 84 + ti * 170;
+    T(svg, x + 30, gy + 14, label, 24, COL.txt, 700);
+    [['b', COL.bog, 'S3 en la Local Zone (bucket de directorio)'], ['v', COL.vir, 'S3 regional (us-east-1)']].forEach(([key, color, name], bi) => {
+      const val = d[key].p50, by = gy + 46 + bi * 56, bw = val * scale;
+      T(svg, x + 30, by - 6, name, 16, COL.mut);
+      bar(svg, x + 30, by, bw, 30, color);
+      T(svg, x + 30 + bw + 12, by + 23, `${fmt(val)} ms`, 24, COL.txt, 800);
+    });
+    const ratio = d.b.p50 / d.v.p50;
+    T(svg, x + w - 30, gy + 14, `×${dec(ratio)} más lento dentro de la zona`, 22, COL.bad, 800, 'end');
+  });
+  T(svg, x + 30, y + h - 22, 'La red llega antes a Bogotá con un operador que enruta directo, pero las escrituras en S3 dentro de la zona cuestan más tiempo.', 17, COL.mut);
+}
+
+(async () => {
+  for (const l of ['bogota-alb', 'virginia-alb', 'bogota-parent-alb']) { try { const r = await fetch('data/raw/curl_' + l + '.csv'); if (r.ok) D[l] = parse(await r.text()); } catch (e) {} }
+  if (!D['bogota-alb']) { document.getElementById('root').textContent = 'No se pudieron cargar los datos: sirve la carpeta con python3 -m http.server.'; return; }
+  ({ '1': card1, '2': card2, '3': card3 }[CARD] || card1)();
+})();
+</script>
+</body>
+</html>

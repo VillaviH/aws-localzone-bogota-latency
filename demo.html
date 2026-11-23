@@ -46,15 +46,15 @@ const TESTS = [
 // Valores de respaldo (medianas medidas) por si los CSV no se pueden cargar (por ejemplo, con file://)
 const FALLBACK = {
   'ISP-A|fibra': {
-    ping:   { bogota:[46,0],   virginia:[225,0] },
-    read1:  { bogota:[105,51], virginia:[244,26], parent:[144,89] },
-    read1mb:{ bogota:[111,56], virginia:[261,32], parent:[146,95] },
-    write:  { bogota:[252,188],virginia:[299,54], parent:[582,533] } },
+    ping:   { bogota:[47,0],   virginia:[224,0] },
+    read1:  { bogota:[105,50], virginia:[246,26], parent:[142,85] },
+    read1mb:{ bogota:[110,56], virginia:[261,32], parent:[146,93] },
+    write:  { bogota:[251,187],virginia:[302,58], parent:[573,481] } },
   'ISP-B|movil': {
-    ping:   { bogota:[327,0],  virginia:[261,0] },
-    read1:  { bogota:[376,50], virginia:[290,26], parent:[417,92] },
-    read1mb:{ bogota:[385,48], virginia:[299,32], parent:[431,100] },
-    write:  { bogota:[505,186],virginia:[329,63], parent:[874,528] } } };
+    ping:   { bogota:[348,0],  virginia:[280,0] },
+    read1:  { bogota:[405,52], virginia:[325,25], parent:[442,89] },
+    read1mb:{ bogota:[415,52], virginia:[324,34], parent:[451,97] },
+    write:  { bogota:[534,186],virginia:[354,66], parent:[870,514] } } };
 
 function parse(t) { const L = t.trim().split(/\r?\n/), h = L.shift().split(','); return L.map(l => { const c = l.split(','), o = {}; h.forEach((k, i) => o[k] = c[i]); o.proto = o.proto || 'http'; o.ttfb = parseFloat(o.ttfb_s) * 1000; o.s3 = parseFloat(o.s3_ms); o.ok = o.http_code === '200' && !isNaN(o.ttfb); o.group = o.isp + '|' + o.net; return o; }); }
 function pct(v, p) { if (!v.length) return NaN; const s = [...v].sort((a, b) => a - b), i = (s.length - 1) * p / 100, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); }

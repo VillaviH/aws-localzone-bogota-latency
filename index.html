@@ -43,7 +43,21 @@
 <div class="card warn" style="margin-top:20px">
   <strong>La pregunta</strong><br>
   Si mis usuarios están en Ecuador (o en otro país de LATAM), ¿mejora la experiencia al mover una aplicación a la Local Zone de Bogotá, frente a Virginia, donde ya están casi todos?
-  <br><span class="small">La distancia en el mapa no decide. Decide la ruta que toma el tráfico desde el operador de cada usuario, y por eso hay que medir desde donde están ellos. Se usan solo servicios que AWS lista como disponibles hoy en la zona: EC2, ELB y S3 One Zone-IA. Datos preliminares: pocas muestras y pocas ventanas de tiempo. Opiniones personales, no de AWS.</span>
+  <br><span class="small">La distancia en el mapa no decide. Decide la ruta que toma el tráfico desde el operador de cada usuario, y por eso hay que medir desde donde están ellos. Se usan solo servicios que AWS lista como disponibles hoy en la zona: EC2, ELB y S3 One Zone-IA. Datos preliminares: una ciudad, dos operadores y cinco ventanas de tiempo. Opiniones personales, no de AWS.</span>
+</div>
+
+<h2>Resumen visual</h2>
+<div class="card" style="padding:12px">
+  <img src="docs/img/resumen-bogota-vs-virginia.png" alt="Bogotá contra Virginia con dos operadores" style="width:100%;border-radius:8px">
+  <p class="small">Mediana del tiempo total de la petición (ms). Con el operador A, Bogotá gana; con el operador B, pierde. Por eso hay que medir con el operador de tus usuarios.</p>
+</div>
+<div class="grid">
+  <div class="card" style="padding:12px"><img src="docs/demo.gif" alt="Carrera con el operador A" style="width:100%;border-radius:8px"><p class="small">Operador A · fibra: escribir 1 MB en S3, cámara lenta.</p></div>
+  <div class="card" style="padding:12px"><img src="docs/demo-movil.gif" alt="Carrera con el operador B" style="width:100%;border-radius:8px"><p class="small">Operador B · móvil 5G: la misma petición.</p></div>
+</div>
+<div class="card" style="padding:12px">
+  <img src="docs/img/app-y-datos-juntos.png" alt="App y datos juntos" style="width:100%;border-radius:8px">
+  <p class="small">Mover la aplicación y dejar los datos en Virginia multiplica el tiempo de escritura por 1,9 y 2,5. <a href="docs/img/tiempo-en-s3.png">También medimos el tiempo en S3</a>.</p>
 </div>
 
 <h2>1. Arquitectura</h2>
@@ -142,7 +156,7 @@
 <ol>
   <li>Clona el repositorio y activa la Local Zone de Bogotá en tu cuenta de AWS.</li>
   <li><code>terraform apply</code> en <code>infra/terraform</code>. Crea 2 EC2, 2 balanceadores y 2 buckets de S3 (uno en la Local Zone y otro en Virginia).</li>
-  <li>Corre <code>scripts/measure.sh</code> desde tu oficina, tu casa o tu celular.</li>
+  <li>Corre <code>./scripts/run_window.sh &lt;TU_ISP&gt; &lt;fibra|movil&gt;</code> desde tu oficina, tu casa o tu celular (unos 28 minutos).</li>
   <li>Abre el <a href="dashboard.html">dashboard</a> y mira tus gráficas. Todo se calcula en tu navegador.</li>
   <li><code>terraform destroy</code> al terminar: los balanceadores y las instancias se cobran por hora.</li>
   <li>Envía tu CSV por pull request a <code>data/community/</code> para armar un mapa real de latencia de Ecuador y LATAM.</li>

@@ -4,9 +4,12 @@
 
 Una prueba de latencia abierta y reproducible: **AWS Local Zone Bogotá** (`us-east-1-bog-1a`) frente a **us-east-1 (Virginia)**, medida desde *tu* oficina, casa o red móvil. La latencia depende mucho del ISP y de la ruta, así que la única forma de saberlo es medir desde donde están tus usuarios.
 
-![Carrera: Local Zone de Bogotá contra Virginia, medida desde Ecuador](docs/demo.gif)
+<p align="center">
+<img src="docs/demo.gif" width="49%" alt="Carrera con ISP-A fibra: Bogotá es más rápida">
+<img src="docs/demo-movil.gif" width="49%" alt="Carrera con ISP-B móvil 5G: Bogotá es más lenta">
+</p>
 
-*La misma petición en cámara lenta, con las medianas medidas. Pruébala en vivo: `demo.html`.*
+*La misma petición (escribir 1 MB en S3) en cámara lenta, con las medianas medidas. Izquierda: ISP-A fibra. Derecha: ISP-B móvil 5G. Pruébala en vivo: `demo.html`.*
 
 Las primeras mediciones se hicieron en Ecuador (ISP-A fibra, ISP-B móvil 5G). Los resultados cambian mucho según el ISP; mira `data/raw/` y el dashboard.
 
@@ -61,24 +64,37 @@ Usa el nombre real de tu ISP en lugar de `<ISP>` (por ejemplo `MYISP`), mantenlo
 - Usa las etiquetas `bogota`, `virginia`, `bogota-alb`, `virginia-alb` y `bogota-parent-alb`. El dashboard las reconoce.
 
 ## Resultados preliminares
-Mediana del tiempo total de la petición a través del balanceador, en milisegundos (Bogotá / Virginia). Medido desde Quito, Ecuador, con 100 muestras por serie y ventana. ISP-A (fibra) se midió en dos ventanas (domingo en la tarde y lunes en la mañana, con el mismo resultado); ISP-B (móvil 5G) en una ventana el lunes en la mañana, más una prueba de `/ping` otro día con el mismo resultado.
+Mediana del tiempo total de la petición a través del balanceador, en milisegundos (Bogotá / Virginia), medido desde Quito, Ecuador. ISP-A (fibra): tres ventanas (domingo en la tarde, lunes 9:27 y lunes 12:15), de 300 a 400 muestras por serie. ISP-B (móvil 5G): dos ventanas (lunes 10:37 y lunes 12:55), 200 muestras por serie, más una prueba de `/ping` el sábado con el mismo resultado.
+
+![Bogotá contra Virginia, con los dos operadores](docs/img/resumen-bogota-vs-virginia.png)
 
 | Prueba | ISP-A fibra | ISP-B móvil 5G |
 |---|---|---|
-| `/ping` | 46 / 225 | 327 / 261 |
-| Leer 1 MB de S3 | 111 / 261 | 385 / 299 |
-| Escribir 1 MB en S3 | 252 / 299 | 505 / 329 |
-| Escribir 1 MB, app en Bogotá + bucket en Virginia | 582 | 874 |
-| Tiempo en S3 dentro del servidor, escribir 1 MB | 188 / 54 | 186 / 63 |
+| `/ping` | 47 / 224 | 348 / 280 |
+| Leer 1 MB de S3 | 110 / 261 | 415 / 324 |
+| Escribir 1 MB en S3 | 251 / 302 | 534 / 354 |
+| Escribir 1 MB, app en Bogotá + bucket en Virginia | 573 | 870 |
+| Tiempo en S3 dentro del servidor, escribir 1 MB | 187 / 58 | 186 / 66 |
 
-- Con la app y sus datos juntos en Bogotá y un operador que llega directo (ISP-A), Bogotá es más rápida: cerca de 80 % menos de tiempo de red, 57 % menos al leer 1 MB y 16 % menos al escribir 1 MB.
-- Con ISP-A la red llega antes a Bogotá (cerca de 80 % menos en `/ping`). Con ISP-B Bogotá es más lenta en todas las pruebas (de 25 % a 54 %).
-- S3 dentro de la Local Zone es más lento que S3 regional (escrituras: unos 187 ms contra 54 a 63 ms), y es igual con los dos operadores, así que viene del servicio y no de la red del usuario.
-- Mover la app y dejar los datos en la región padre hace las escrituras unas dos veces más lentas que dejar todo en Virginia, con esperas ocasionales de varios segundos dentro de la llamada a S3 (5 de 300 peticiones en la ventana de ISP-B).
+El resultado se repite en cada ventana:
+
+| Ventana | `/ping` | Leer 1 MB | Escribir 1 MB |
+|---|---|---|---|
+| ISP-A, domingo en la tarde | 47 / 233 | 111 / 262 | 255 / 302 |
+| ISP-A, lunes 9:27 | 46 / 218 | 111 / 254 | 251 / 291 |
+| ISP-A, lunes 12:15 | 47 / 222 | 108 / 260 | 250 / 305 |
+| ISP-B, lunes 10:37 | 327 / 261 | 385 / 299 | 505 / 329 |
+| ISP-B, lunes 12:55 | 401 / 345 | 457 / 384 | 568 / 406 |
+
+- Con la app y sus datos juntos en Bogotá y un operador que llega directo (ISP-A), Bogotá es más rápida: 79 % menos de tiempo de red, 58 % menos al leer 1 MB y 17 % menos al escribir 1 MB. En el peor caso (p95), las escrituras son más lentas en Bogotá (393 ms contra 342 ms).
+- Con ISP-B, Bogotá es más lenta en todas las pruebas (de 24 % a 51 % en las medianas combinadas, de 16 % a 54 % por ventana). Mi hipótesis es que es la ruta de ese operador y no la zona, pero no la he verificado con `mtr`.
+- S3 dentro de la Local Zone es más lento que S3 regional (escrituras: unos 187 ms contra 58 a 66 ms). Es igual con los dos operadores, así que viene del servicio y no de la red del usuario.
+- Mover la app y dejar los datos en la región padre hace las escrituras 1,9 veces (ISP-A) y 2,5 veces (ISP-B) más lentas que dejar todo en Virginia. Con ISP-B, 6 de 600 peticiones de esa serie tardaron más de 1,5 s (la más larga, 23 s), casi todo dentro de la llamada a S3.
+- Cada consulta de la instancia de Bogotá a la de Virginia por la red privada costó unos 59 ms (71 ms en la primera prueba).
 - Preliminar: una ciudad, dos operadores y pocas ventanas. No generalices; mide desde tu propia red.
 
 ## Dashboard
-`dashboard.html` lee los CSV en el navegador (no sube nada). Sirve la carpeta (`python3 -m http.server`) y abre `/dashboard.html`, o arrastra tus CSV a la página. Muestra p50/p95/p99, jitter, pérdida, evolución en el tiempo y comparación por ISP. Para publicarlo, usa GitHub Pages o S3 con CloudFront.
+`dashboard.html` lee los CSV en el navegador (no sube nada). Sirve la carpeta (`python3 -m http.server`) y abre `/dashboard.html`, o arrastra tus CSV a la página. Muestra p50/p95/p99, jitter, pérdida, evolución en el tiempo y comparación por ISP. Para publicarlo, usa GitHub Pages o S3 con CloudFront. `charts.html` dibuja las tarjetas de las imágenes de arriba (`?card=1|2|3&clean=1`).
 
 ## Buenas prácticas de medición
 - Mismo cliente, misma app, mismo tipo de instancia y mismo payload; mide las dos ubicaciones **en paralelo**.
