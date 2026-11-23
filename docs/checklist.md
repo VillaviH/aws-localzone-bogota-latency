@@ -1,9 +1,12 @@
-- [ ] Verificar zona y región padre
-- [ ] Opt-in de la Local Zone
-- [ ] Terraform: VPC + subred + EC2 (Bogotá, us-east-1)
-- [ ] App `/ping` y `/payload` (1 MB)
-- [ ] Medir 24 h con 2-3 ISPs
-- [ ] Calcular p50/p95/p99, jitter, pérdida
-- [ ] Dashboard y gráfica principal
-- [ ] Publicar repo, CSV, post/video
-- [ ] Destruir recursos
+- [x] Verificar zona y región padre (us-east-1-bog-1a, padre us-east-1b)
+- [x] Opt-in de la Local Zone
+- [x] Terraform: VPC, subredes, EC2, ELB y S3 (Bogotá y Virginia)
+- [x] App con /ping, /payload, /api/read y /api/write (S3), /upstream
+- [x] Medir ISP-A fibra (2 ventanas) e ISP-B móvil (1 ventana)
+- [x] Calcular p50/p95/p99, jitter, pérdida (dashboard)
+- [x] Dashboard, demo animada y GIF
+- [x] Publicar repo
+- [ ] Más ventanas (mediodía, noche) y más operadores / ciudades
+- [ ] mtr desde ISP-B para explicar la ruta
+- [ ] Publicar artículo y post
+- [ ] Destruir recursos (terraform destroy)

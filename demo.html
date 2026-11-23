@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Zone de Bogotá vs Virginia: la misma petición, medida desde Ecuador</title>
+<style>
+  :root { --bg:#0b1118; --card:#17212c; --txt:#e6edf3; --mut:#9fb0c0; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  body { display:flex; flex-direction:column; align-items:center; }
+  #controls { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding:12px 16px; width:100%; max-width:1100px; }
+  #controls label { font-size:12px; color:var(--mut); display:flex; flex-direction:column; gap:3px; }
+  #controls select, #controls button { background:#17212c; color:var(--txt); border:1px solid #2a3948; border-radius:6px; padding:6px 10px; font:inherit; font-size:14px; }
+  #controls .chk { flex-direction:row; align-items:center; gap:6px; font-size:14px; color:var(--txt); padding-bottom:6px; }
+  svg { width:min(100vw, calc(100vh - 80px)); height:auto; display:block; }
+  body.clean svg { width:100vw; height:100vh; }
+  body.clean #controls { display:none; }
+  svg text { font-family:inherit; }
+  .hint { font-size:12px; color:var(--mut); padding:0 16px 10px; max-width:1100px; width:100%; }
+  body.clean .hint { display:none; }
+</style>
+</head>
+<body>
+<div id="controls">
+  <label>Prueba <select id="sTest"></select></label>
+  <label>Conexión <select id="sIsp"></select></label>
+  <label class="chk"><input type="checkbox" id="cParent" checked> Mostrar app en Bogotá con bucket en Virginia</label>
+  <button id="bRestart">Reiniciar</button>
+</div>
+<svg id="stage" viewBox="0 0 1080 1080" role="img" aria-label="Animación de latencia: Bogotá contra Virginia"></svg>
+<div class="hint">Carrera en cámara lenta: las tres peticiones salen a la vez y cada una dura su mediana medida (p50), ampliada para poder verla. Para grabar un video usa <code>?clean=1</code>. Parámetros: <code>test</code> (ping, read1, read1mb, write), <code>isp</code> (por ejemplo <code>ISP-A|fibra</code>), <code>parent</code> (0 o 1).</div>
+
+<script>
+const Q = new URLSearchParams(location.search);
+const CLEAN = Q.has('clean'); if (CLEAN) document.body.classList.add('clean');
+const FROZEN = Q.has('t'); const T_FIXED = parseFloat(Q.get('t')) || 0;
+const NS = 'http://www.w3.org/2000/svg';
+const COLORS = { bogota: '#2f81f7', virginia: '#a371f7', parent: '#3fb950' };
+const TESTS = [
+  { id: 'ping',   name: 'Petición mínima (/ping)',  path: '/ping' },
+  { id: 'read1',  name: 'Leer 1 KB de S3',          path: '/api/read?obj=small' },
+  { id: 'read1mb',name: 'Leer 1 MB de S3',          path: '/api/read?obj=large' },
+  { id: 'write',  name: 'Escribir 1 MB en S3',      path: '/api/write?obj=large' }
+];
+// Valores de respaldo (medianas medidas) por si los CSV no se pueden cargar (por ejemplo, con file://)
+const FALLBACK = {
+  'ISP-A|fibra': {
+    ping:   { bogota:[46,0],   virginia:[225,0] },
+    read1:  { bogota:[105,51], virginia:[244,26], parent:[144,89] },
+    read1mb:{ bogota:[111,56], virginia:[261,32], parent:[146,95] },
+    write:  { bogota:[252,188],virginia:[299,54], parent:[582,533] } },
+  'ISP-B|movil': {
+    ping:   { bogota:[327,0],  virginia:[261,0] },
+    read1:  { bogota:[376,50], virginia:[290,26], parent:[417,92] },
+    read1mb:{ bogota:[385,48], virginia:[299,32], parent:[431,100] },
+    write:  { bogota:[505,186],virginia:[329,63], parent:[874,528] } } };
+
+function parse(t) { const L = t.trim().split(/\r?\n/), h = L.shift().split(','); return L.map(l => { const c = l.split(','), o = {}; h.forEach((k, i) => o[k] = c[i]); o.proto = o.proto || 'http'; o.ttfb = parseFloat(o.ttfb_s) * 1000; o.s3 = parseFloat(o.s3_ms); o.ok = o.http_code === '200' && !isNaN(o.ttfb); o.group = o.isp + '|' + o.net; return o; }); }
+function pct(v, p) { if (!v.length) return NaN; const s = [...v].sort((a, b) => a - b), i = (s.length - 1) * p / 100, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); }
+const ROWS = {};
+async function loadData() {
+  for (const l of ['bogota', 'virginia', 'bogota-alb', 'virginia-alb', 'bogota-parent-alb']) {
+    try { const r = await fetch('data/raw/curl_' + l + '.csv'); if (r.ok) ROWS[l] = parse(await r.text()); } catch (e) {}
+  }
+}
+function getLane(label, path, group) {
+  const rs = (ROWS[label] || []).filter(r => r.ok && r.proto === 'http' && r.path === path && r.group === group);
+  if (rs.length < 10) return null;
+  const s3 = rs.map(r => r.s3).filter(x => !isNaN(x));
+  return { t: pct(rs.map(r => r.ttfb), 50), s3: s3.length ? pct(s3, 50) : 0, n: rs.length };
+}
+function scenario(test, group, wantParent) {
+  const out = [];
+  if (Object.keys(ROWS).length) {
+    const b = getLane('bogota-alb', test.path, group) || (test.id === 'ping' ? getLane('bogota', test.path, group) : null);
+    const v = getLane('virginia-alb', test.path, group) || (test.id === 'ping' ? getLane('virginia', test.path, group) : null);
+    const p = (test.id !== 'ping' && wantParent) ? getLane('bogota-parent-alb', test.path, group) : null;
+    if (b) out.push({ key: 'bogota', name: 'Bogotá · Local Zone', ...b });
+    if (v) out.push({ key: 'virginia', name: 'Virginia · región', ...v });
+    if (p) out.push({ key: 'parent', name: 'App en Bogotá + bucket en Virginia', ...p });
+  } else {
+    const f = (FALLBACK[group] || {})[test.id] || {};
+    if (f.bogota) out.push({ key: 'bogota', name: 'Bogotá · Local Zone', t: f.bogota[0], s3: f.bogota[1], n: 100 });
+    if (f.virginia) out.push({ key: 'virginia', name: 'Virginia · región', t: f.virginia[0], s3: f.virginia[1], n: 100 });
+    if (f.parent && wantParent && test.id !== 'ping') out.push({ key: 'parent', name: 'App en Bogotá + bucket en Virginia', t: f.parent[0], s3: f.parent[1], n: 100 });
+  }
+  return out;
+}
+
+const svg = document.getElementById('stage');
+function el(tag, attrs, parent, text) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; (parent || svg).appendChild(e); return e; }
+
+let lanes = [], slow = 20, t0 = 0, headline = null, roundLen = 4000;
+const C = { x: 190, y: 560 };            // salida del cliente
+const X = { alb: 430, ec2: 660, s3: 890 };
+
+function build() {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  lanes = [];
+  const test = TESTS.find(t => t.id === sTest.value), group = sIsp.value;
+  const sc = scenario(test, group, cParent.checked);
+  el('rect', { x: 0, y: 0, width: 1080, height: 1080, fill: '#0b1118' });
+  el('text', { x: 540, y: 62, 'text-anchor': 'middle', 'font-size': 30, fill: '#9fb0c0' }, null, 'La misma petición, medida desde Ecuador');
+  if (sc.length < 2) {
+    el('text', { x: 540, y: 540, 'text-anchor': 'middle', 'font-size': 32, fill: '#f0883e' }, null, 'Sin datos para esta prueba con esta conexión');
+    return;
+  }
+  const b = sc.find(s => s.key === 'bogota'), v = sc.find(s => s.key === 'virginia');
+  const d = 100 * (v.t - b.t) / v.t;
+  headline = el('text', { x: 540, y: 128, 'text-anchor': 'middle', 'font-size': 50, 'font-weight': 800, fill: d >= 0 ? '#3fb950' : '#f85149' }, null,
+    d >= 0 ? `Bogotá responde ${Math.round(d)} % más rápido` : `Bogotá responde ${Math.round(-d)} % más lento`);
+  el('text', { x: 540, y: 168, 'text-anchor': 'middle', 'font-size': 26, fill: '#e6edf3' }, null,
+    `${test.name} · ${group.replace('|', ' ')} · mediana de ${Math.min(...sc.map(s => s.n))}+ muestras`);
+
+  const maxT = Math.max(...sc.map(s => s.t));
+  slow = parseFloat(Q.get('slow')) || Math.max(6, Math.min(40, 3000 / maxT));
+  roundLen = maxT * slow + 1100;   // todas salen juntas; la ronda termina cuando llega la más lenta
+  document.body.dataset.round = Math.round(roundLen);
+
+  const top = 200, bottom = 985, N = sc.length, gap = 14, laneH = (bottom - top - gap * (N - 1)) / N;
+  // cliente
+  const cy = top + (bottom - top) / 2;
+  C.y = cy;
+  el('rect', { x: 28, y: cy - 70, width: 160, height: 140, rx: 14, fill: '#17212c', stroke: '#2a3948', 'stroke-width': 2 });
+  el('text', { x: 108, y: cy - 14, 'text-anchor': 'middle', 'font-size': 26, 'font-weight': 700, fill: '#e6edf3' }, null, 'Tu red');
+  el('text', { x: 108, y: cy + 18, 'text-anchor': 'middle', 'font-size': 20, fill: '#9fb0c0' }, null, 'Ecuador');
+  el('text', { x: 108, y: cy + 46, 'text-anchor': 'middle', 'font-size': 36 }, null, '💻');
+  C.x = 188;
+
+  sc.forEach((s, i) => {
+    const y0 = top + i * (laneH + gap), yc = y0 + laneH / 2 + 18, col = COLORS[s.key];
+    el('rect', { x: 205, y: y0, width: 850, height: laneH, rx: 14, fill: '#101922', stroke: col, 'stroke-width': 2, opacity: 0.9 });
+    el('text', { x: 225, y: y0 + 34, 'font-size': 26, 'font-weight': 800, fill: col }, null, s.name);
+    const timer = el('text', { x: 1035, y: y0 + 34, 'text-anchor': 'end', 'font-size': 30, 'font-weight': 800, fill: '#e6edf3' }, null, '');
+    const count = el('text', { x: 1035, y: y0 + 64, 'text-anchor': 'end', 'font-size': 20, fill: '#9fb0c0' }, null, '');
+    // enlaces
+    const lk = (x1, y1, x2, y2) => el('line', { x1, y1, x2, y2, stroke: col, 'stroke-width': 3, 'stroke-dasharray': '6 7', opacity: 0.55 });
+    lk(C.x, C.y, X.alb - 70, yc); lk(X.alb + 70, yc, X.ec2 - 70, yc); lk(X.ec2 + 70, yc, X.s3 - 70, yc);
+    // nodos
+    const nodes = {};
+    const nh = Math.min(96, laneH - 90);
+    const node = (key, x, title, sub) => {
+      const r = el('rect', { x: x - 70, y: yc - nh / 2, width: 140, height: nh, rx: 12, fill: '#17212c', stroke: col, 'stroke-width': 2 });
+      el('text', { x, y: yc - 2, 'text-anchor': 'middle', 'font-size': 22, 'font-weight': 700, fill: '#e6edf3' }, null, title);
+      if (nh > 60) el('text', { x, y: yc + 24, 'text-anchor': 'middle', 'font-size': 15, fill: '#9fb0c0' }, null, sub);
+      nodes[key] = r;
+    };
+    const s3sub = s.key === 'bogota' ? 'dentro de la zona' : (s.key === 'parent' ? 'regional (Virginia)' : 'regional');
+    node('alb', X.alb, 'ELB', 'balanceador'); node('ec2', X.ec2, 'EC2', s.key === 'virginia' ? 'Virginia' : 'Bogotá'); node('s3', X.s3, 'S3', s3sub);
+    const dot = el('circle', { r: 13, fill: '#ffffff', stroke: col, 'stroke-width': 5, opacity: 0 });
+    const glow = el('circle', { r: 26, fill: col, opacity: 0 });
+    lanes.push({ ...s, yc, col, timer, count, nodes, dot, glow });
+  });
+  el('text', { x: 28, y: 1042, 'font-size': 20, fill: '#9fb0c0' }, null, `Cámara lenta ×${slow.toFixed(0)} · datos preliminares · p50 medido`);
+  el('text', { x: 1052, y: 1042, 'text-anchor': 'end', 'font-size': 20, fill: '#9fb0c0' }, null, 'github.com/VillaviH/aws-localzone-bogota-latency');
+}
+
+function along(pts, u) {      // posición a lo largo de una polilínea, u en [0,1]
+  const L = []; let tot = 0;
+  for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); L.push(l); tot += l; }
+  let d = Math.max(0, Math.min(1, u)) * tot;
+  for (let i = 0; i < L.length; i++) { if (d <= L[i] || i === L.length - 1) { const f = L[i] ? Math.min(1, d / L[i]) : 0; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f]; } d -= L[i]; }
+}
+function render(t) {
+  const k = Math.floor(t / roundLen), local = t - k * roundLen;
+  const order = [...lanes].sort((a, b) => a.t - b.t);
+  lanes.forEach(L => {
+    const total = L.t, s3 = Math.min(L.s3, total * 0.9), net = total - s3, busy = total * slow;
+    const A = [X.alb, L.yc], E = [X.ec2, L.yc], S = [X.s3, L.yc], Cp = [C.x, C.y];
+    let pos = null, ms = total, running = local < busy;
+    if (running) {
+      ms = local / slow;
+      if (ms < net / 2) pos = along([Cp, A, E], ms / (net / 2));
+      else if (ms < net / 2 + s3) { const p = (ms - net / 2) / (s3 || 1); pos = p < 0.5 ? along([E, S], p * 2) : along([S, E], (p - 0.5) * 2); }
+      else pos = along([E, A, Cp], (ms - net / 2 - s3) / (net / 2));
+    }
+    L.timer.textContent = (running ? '⏱ ' : '✔ ') + Math.round(ms) + ' ms';
+    L.timer.setAttribute('fill', running ? '#e6edf3' : L.col);
+    const rank = order.indexOf(L);
+    L.count.textContent = running ? 'en camino…' : ['🥇 1.º lugar', '🥈 2.º lugar', '🥉 3.º lugar'][rank];
+    const inS3 = running && ms >= net / 2 && ms < net / 2 + s3;
+    if (pos) { L.dot.setAttribute('cx', pos[0]); L.dot.setAttribute('cy', pos[1]); L.dot.setAttribute('opacity', 1); L.glow.setAttribute('cx', pos[0]); L.glow.setAttribute('cy', pos[1]); L.glow.setAttribute('opacity', 0.28); }
+    else { L.dot.setAttribute('opacity', 0); L.glow.setAttribute('opacity', 0); }
+    const near = (x) => pos && Math.abs(pos[0] - x) < 45;
+    L.nodes.alb.setAttribute('stroke-width', near(X.alb) ? 6 : 2);
+    L.nodes.ec2.setAttribute('stroke-width', near(X.ec2) && !inS3 ? 6 : 2);
+    L.nodes.s3.setAttribute('stroke-width', inS3 ? 6 : 2);
+    L.nodes.s3.setAttribute('fill', inS3 ? '#223344' : '#17212c');
+  });
+}
+
+const sTest = document.getElementById('sTest'), sIsp = document.getElementById('sIsp'), cParent = document.getElementById('cParent');
+function restart() { build(); t0 = performance.now(); if (FROZEN) { render(T_FIXED); window.__ready = true; } }
+function loop(now) { render(now - t0); requestAnimationFrame(loop); }
+
+(async () => {
+  TESTS.forEach(t => sTest.add(new Option(t.name, t.id)));
+  await loadData();
+  const groups = new Set(); Object.values(ROWS).forEach(rs => rs.forEach(r => groups.add(r.group)));
+  if (!groups.size) Object.keys(FALLBACK).forEach(g => groups.add(g));
+  [...groups].sort().forEach(g => sIsp.add(new Option(g.replace('|', ' · '), g)));
+  if ([...sIsp.options].some(o => o.value === 'ISP-A|fibra')) sIsp.value = 'ISP-A|fibra';
+  sTest.value = Q.get('test') && TESTS.some(t => t.id === Q.get('test')) ? Q.get('test') : 'write';
+  if (Q.get('isp') && [...sIsp.options].some(o => o.value === Q.get('isp'))) sIsp.value = Q.get('isp');
+  cParent.checked = Q.get('parent') !== '0';
+  [sTest, sIsp, cParent].forEach(e => e.addEventListener('change', restart));
+  document.getElementById('bRestart').addEventListener('click', restart);
+  restart();
+  if (!FROZEN) requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
