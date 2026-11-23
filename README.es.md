@@ -71,6 +71,7 @@ Mediana del tiempo total de la petición a través del balanceador, en milisegun
 | Escribir 1 MB, app en Bogotá + bucket en Virginia | 582 | 874 |
 | Tiempo en S3 dentro del servidor, escribir 1 MB | 188 / 54 | 186 / 63 |
 
+- Con la app y sus datos juntos en Bogotá y un operador que llega directo (ISP-A), Bogotá es más rápida: cerca de 80 % menos de tiempo de red, 57 % menos al leer 1 MB y 16 % menos al escribir 1 MB.
 - Con ISP-A la red llega antes a Bogotá (cerca de 80 % menos en `/ping`). Con ISP-B Bogotá es más lenta en todas las pruebas (de 25 % a 54 %).
 - S3 dentro de la Local Zone es más lento que S3 regional (escrituras: unos 187 ms contra 54 a 63 ms), y es igual con los dos operadores, así que viene del servicio y no de la red del usuario.
 - Mover la app y dejar los datos en la región padre hace las escrituras unas dos veces más lentas que dejar todo en Virginia, con esperas ocasionales de varios segundos dentro de la llamada a S3 (5 de 300 peticiones en la ventana de ISP-B).

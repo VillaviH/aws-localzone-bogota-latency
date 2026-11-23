@@ -76,6 +76,7 @@ Median total time of the request through the load balancer, in milliseconds (Bog
 | Write 1 MB, app in Bogotá + bucket in Virginia | 582 | 874 |
 | Time spent in S3 inside the server, write 1 MB | 188 / 54 | 186 / 63 |
 
+- With the app and its data together in Bogotá and a well-routed operator (ISP-A), Bogotá is faster: about 80 % less network time, 57 % less to read 1 MB and 16 % less to write 1 MB.
 - With ISP-A the network reaches Bogotá first (about 80 % less on `/ping`). With ISP-B Bogotá is slower in every test (25 % to 54 %).
 - S3 inside the Local Zone is slower than regional S3 (writes: about 187 ms against 54 to 63 ms), and it is the same with both operators, so it comes from the service and not from the user's network.
 - Moving the app but leaving the data in the parent region makes writes about twice as slow as keeping everything in Virginia, with occasional multi-second stalls inside the S3 call (5 of 300 requests in the ISP-B window).
