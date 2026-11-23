@@ -60,6 +60,11 @@
   <p class="small">Mover la aplicación y dejar los datos en Virginia multiplica el tiempo de escritura por 1,9 y 2,5. <a href="docs/img/tiempo-en-s3.png">También medimos el tiempo en S3</a>.</p>
 </div>
 
+<div class="card" style="padding:12px">
+  <img src="docs/img/la-ruta-del-trafico.png" alt="La ruta del tráfico con cada operador" style="width:100%;border-radius:8px">
+  <p class="small">Un <code>mtr</code> explica la diferencia: el tráfico del operador B hacia Bogotá pasa primero por Miami (143 ms), mientras el operador A llega directo (20 ms). Es una observación de un solo día por operador.</p>
+</div>
+
 <h2>1. Arquitectura</h2>
 <div class="card">
 <svg viewBox="0 0 940 430" width="100%" role="img" aria-label="Diagrama de arquitectura">
@@ -145,7 +150,7 @@
 <div class="card warn">
   <strong>Cómo leerlo</strong>
   <ul>
-    <li>El resultado depende del operador: con una conexión Bogotá puede ganar por mucho y con otra puede perder.</li>
+    <li>El resultado depende del operador: con una conexión Bogotá puede ganar por mucho y con otra puede perder, porque la ruta del tráfico cambia (con el operador B pasa por Miami antes de llegar a Bogotá).</li>
     <li>Un servicio puede ser más lento dentro de la zona que en la región, aunque la red del usuario llegue antes. Por eso se mide el tiempo de S3 por separado.</li>
     <li>La Local Zone no tiene todos los servicios de AWS. Revisa el <a href="https://aws.amazon.com/es/blogs/infrastructure-sustainability/now-open-aws-local-zones-in-bogota-colombia/">anuncio oficial</a> antes de pensar en migrar.</li>
   </ul>

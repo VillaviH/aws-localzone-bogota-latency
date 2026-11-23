@@ -87,11 +87,23 @@ El resultado se repite en cada ventana:
 | ISP-B, lunes 12:55 | 401 / 345 | 457 / 384 | 568 / 406 |
 
 - Con la app y sus datos juntos en Bogotá y un operador que llega directo (ISP-A), Bogotá es más rápida: 79 % menos de tiempo de red, 58 % menos al leer 1 MB y 17 % menos al escribir 1 MB. En el peor caso (p95), las escrituras son más lentas en Bogotá (393 ms contra 342 ms).
-- Con ISP-B, Bogotá es más lenta en todas las pruebas (de 24 % a 51 % en las medianas combinadas, de 16 % a 54 % por ventana). Mi hipótesis es que es la ruta de ese operador y no la zona, pero no la he verificado con `mtr`.
+- Con ISP-B, Bogotá es más lenta en todas las pruebas (de 24 % a 51 % en las medianas combinadas, de 16 % a 54 % por ventana). `mtr` explica por qué: el tráfico de ISP-B hacia la Local Zone de Bogotá pasa primero por Miami (unos 87 ms para llegar a Miami y 143 ms para llegar a Bogotá), mientras que ISP-A llega directo a Bogotá en unos 20 ms. Es la ruta de ese operador, no la zona.
 - S3 dentro de la Local Zone es más lento que S3 regional (escrituras: unos 187 ms contra 58 a 66 ms). Es igual con los dos operadores, así que viene del servicio y no de la red del usuario.
 - Mover la app y dejar los datos en la región padre hace las escrituras 1,9 veces (ISP-A) y 2,5 veces (ISP-B) más lentas que dejar todo en Virginia. Con ISP-B, 6 de 600 peticiones de esa serie tardaron más de 1,5 s (la más larga, 23 s), casi todo dentro de la llamada a S3.
 - Cada consulta de la instancia de Bogotá a la de Virginia por la red privada costó unos 59 ms (71 ms en la primera prueba).
 - Preliminar: una ciudad, dos operadores y pocas ventanas. No generalices; mide desde tu propia red.
+
+## Verificación de la ruta (`mtr`)
+![Ruta del tráfico hacia Bogotá y Virginia](docs/img/la-ruta-del-trafico.png)
+
+Mejor tiempo de ida y vuelta de 50 paquetes (`sudo mtr -rwbzc 50 <IP>`, archivos en `docs/mtr/`):
+
+| Ruta | Hacia la Local Zone de Bogotá | Hacia Virginia |
+|---|---|---|
+| ISP-A fibra (21 nov) | 20 ms, directo | 95 ms, por Bogotá, Barranquilla y Miami |
+| ISP-B móvil 5G (23 nov) | 143 ms, por Miami | 117 ms, por Miami |
+
+Las ciudades se infieren de los nombres de host que muestra `mtr`, los saltos que no responden no aparecen y las rutas cambian con el tiempo, así que es una observación por operador, no una regla.
 
 ## Dashboard
 `dashboard.html` lee los CSV en el navegador (no sube nada). Sirve la carpeta (`python3 -m http.server`) y abre `/dashboard.html`, o arrastra tus CSV a la página. Muestra p50/p95/p99, jitter, pérdida, evolución en el tiempo y comparación por ISP. Para publicarlo, usa GitHub Pages o S3 con CloudFront. `charts.html` dibuja las tarjetas de las imágenes de arriba (`?card=1|2|3&clean=1`).

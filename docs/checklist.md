@@ -7,6 +7,6 @@
 - [x] Dashboard, demo animada, GIF y tarjetas para compartir
 - [x] Publicar repo
 - [ ] Más ventanas (noche, fin de semana) y más operadores / ciudades
-- [ ] mtr desde ISP-B para explicar la ruta
+- [x] mtr desde ISP-A e ISP-B para explicar la ruta
 - [ ] Publicar artículo y post
 - [ ] Destruir recursos (terraform destroy)

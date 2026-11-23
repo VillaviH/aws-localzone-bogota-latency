@@ -13,7 +13,7 @@
 </style>
 </head>
 <body>
-<nav>Tarjetas (1200×675): <a href="?card=1">1 · Resumen</a><a href="?card=2">2 · Datos juntos</a><a href="?card=3">3 · Tiempo en S3</a> · Para exportar: <code>?card=1&amp;clean=1</code></nav>
+<nav>Tarjetas (1200×675): <a href="?card=1">1 · Resumen</a><a href="?card=2">2 · Datos juntos</a><a href="?card=3">3 · Tiempo en S3</a><a href="?card=4">4 · La ruta</a> · Para exportar: <code>?card=1&amp;clean=1</code></nav>
 <div id="root"></div>
 <script>
 const Q = new URLSearchParams(location.search);
@@ -126,10 +126,45 @@ function card3() {
   T(svg, x + 30, y + h - 22, 'La red llega antes a Bogotá con un operador que enruta directo, pero las escrituras en S3 dentro de la zona cuestan más tiempo.', 17, COL.mut);
 }
 
+
+// Tarjeta 4: ruta observada con mtr (mejor RTT acumulado de 50 paquetes; docs/mtr/). Ciudades inferidas de los nombres de host.
+function card4() {
+  const svg = base('Por qué cambia el resultado: la ruta del tráfico', 'Tiempo de ida y vuelta acumulado hasta cada punto de la ruta (mtr, mejor valor de 50 paquetes) · la ruta puede cambiar con el tiempo');
+  const PANELS = [
+    { name: 'Operador A · fibra', note: 'Llega directo a Colombia: Bogotá a 20 ms',
+      rows: [ { title: 'Desde Quito hacia la Local Zone de Bogotá', color: COL.bog, end: 'Local Zone', pts: [[0, 'Quito'], [20, 'Bogotá LZ']] },
+              { title: 'Desde Quito hacia Virginia', color: COL.vir, end: 'Virginia', pts: [[0, 'Quito'], [18, 'Bogotá'], [33, 'Barranquilla'], [67, 'Miami'], [95, 'Virginia']] } ] },
+    { name: 'Operador B · móvil 5G', note: 'Pasa por Miami antes de llegar a Bogotá',
+      rows: [ { title: 'Desde Quito hacia la Local Zone de Bogotá', color: COL.bog, end: 'Local Zone', pts: [[0, 'Quito'], [87, 'Miami'], [143, 'Bogotá LZ']] },
+              { title: 'Desde Quito hacia Virginia', color: COL.vir, end: 'Virginia', pts: [[0, 'Quito'], [85, 'Miami'], [117, 'Virginia']] } ] }
+  ];
+  const px = 2.9; // píxeles por ms
+  PANELS.forEach((P, pi) => {
+    const x = 40 + pi * 580, y = 118, w = 540, h = 452;
+    panel(svg, x, y, w, h, P.name, '');
+    P.rows.forEach((R, ri) => {
+      const ry = y + 78 + ri * 152, x0 = x + 34, ly = ry + 66;
+      T(svg, x + 24, ry + 8, R.title, 20, COL.txt, 700);
+      const last = R.pts[R.pts.length - 1][0];
+      el('line', { x1: x0, y1: ly, x2: x0 + last * px, y2: ly, stroke: R.color, 'stroke-width': 5, 'stroke-linecap': 'round' }, svg);
+      R.pts.forEach(([ms, city], i) => {
+        const cx = x0 + ms * px, isEnd = i === R.pts.length - 1;
+        el('circle', { cx, cy: ly, r: isEnd ? 11 : 7, fill: isEnd ? R.color : COL.card, stroke: R.color, 'stroke-width': 3 }, svg);
+        if (i === 0) return;                       // el origen (Quito) va en el título de la fila
+        const up = i % 2 === 1;
+        const anchor = isEnd && ms > 100 ? 'end' : 'middle';
+        T(svg, anchor === 'end' ? cx + 8 : cx, up ? ly - 24 : ly + 38, `${city} · ${ms} ms`, 16, isEnd ? COL.txt : COL.mut, isEnd ? 800 : 500, anchor);
+      });
+    });
+    T(svg, x + 24, y + h - 24, P.note, 20, pi === 0 ? COL.good : COL.bad, 800);
+  });
+  T(svg, 40, 612, 'Ciudades inferidas de los nombres de host que muestra mtr. Los saltos que no responden no aparecen. Cada ruta se midió un solo día (A: 21 nov, B: 23 nov).', 16, COL.mut);
+}
+
 (async () => {
   for (const l of ['bogota-alb', 'virginia-alb', 'bogota-parent-alb']) { try { const r = await fetch('data/raw/curl_' + l + '.csv'); if (r.ok) D[l] = parse(await r.text()); } catch (e) {} }
   if (!D['bogota-alb']) { document.getElementById('root').textContent = 'No se pudieron cargar los datos: sirve la carpeta con python3 -m http.server.'; return; }
-  ({ '1': card1, '2': card2, '3': card3 }[CARD] || card1)();
+  ({ '1': card1, '2': card2, '3': card3, '4': card4 }[CARD] || card1)();
 })();
 </script>
 </body>
